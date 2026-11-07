@@ -1,9 +1,10 @@
 // ==UserScript==
-// @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ
+// @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.2
+// @version      3.5
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
+// @match        https://a.lnwstore.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -72,19 +73,30 @@
   function api(action, payload, quiet) {
     const cfg = quiet ? { url: GM_getValue('apiUrl', ''), token: GM_getValue('apiToken', '') } : settings(false);
     if (!cfg || !cfg.url) return Promise.reject(new Error('ยังไม่ได้ตั้งค่าลิงก์/รหัส'));
-    return new Promise((res, rej) => {
+    const body = JSON.stringify(Object.assign({ token: cfg.token, action }, payload));
+    const once = () => new Promise((res, rej) => {
       GM_xmlhttpRequest({
-        method: 'POST', url: cfg.url, timeout: 120000,
+        method: 'POST', url: cfg.url, timeout: 180000,
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        data: JSON.stringify(Object.assign({ token: cfg.token, action }, payload)),
+        data: body,
         onload: r => {
-          let j; try { j = JSON.parse(r.responseText); } catch (e) { return rej(new Error('Packing Cam ตอบผิดรูปแบบ (HTTP ' + r.status + ')')); }
+          let j; try { j = JSON.parse(r.responseText); } catch (e) {
+            const t = String(r.responseText || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+            const err = new Error('Packing Cam ตอบผิดรูปแบบ (HTTP ' + r.status + ')' + (t ? ': ' + t : '')); err.retry = r.status >= 500 || r.status === 429; return rej(err);
+          }
           j.ok ? res(j) : rej(new Error(j.error || 'ไม่สำเร็จ'));
         },
-        onerror: () => rej(new Error('เชื่อมต่อ Packing Cam ไม่ได้')),
-        ontimeout: () => rej(new Error('Packing Cam ตอบช้าเกินไป'))
+        onerror: r => { const e = new Error('เชื่อมต่อ Packing Cam ไม่ได้' + (r && (r.error || r.status) ? ' (' + (r.error || 'HTTP ' + r.status) + ')' : '') +
+          ' – เช็กว่า Tampermonkey อนุญาตให้เชื่อมต่อ script.google.com แล้ว'); e.retry = true; rej(e); },
+        ontimeout: () => { const e = new Error('Packing Cam ตอบช้าเกินไป'); e.retry = true; rej(e); }
       });
     });
+    return (async () => {                                       // ลองใหม่สูงสุด 3 ครั้ง (เน็ต/Google สะดุดชั่วคราว)
+      for (let a = 1; ; a++) {
+        try { return await once(); }
+        catch (e) { if (!e.retry || a >= 3) throw e; console.warn('[Packing Cam] ลองใหม่ ' + a, e.message); await sleep(4000 * a); }
+      }
+    })();
   }
 
   /* ---------------- API ของ Seller Centre (ใช้การล็อกอินของคุณเอง) ---------------- */
@@ -342,7 +354,10 @@
     const res = await fetch('/api/v3/settings/download_report/?report_id=' + job.id + cds(), { credentials: 'include' });
     if (!res.ok) throw new Error('ดาวน์โหลดไฟล์คำสั่งซื้อไม่ได้ (HTTP ' + res.status + ')');
     const blob = await res.blob();
-    if (blob.size < 500) throw new Error('ไฟล์คำสั่งซื้อที่ได้ไม่ถูกต้อง');
+    if (blob.size < 500) {
+      const txt = (await blob.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 150);
+      throw new Error('ไฟล์คำสั่งซื้อที่ได้ไม่ถูกต้อง (' + blob.size + ' ไบต์' + (txt ? ': ' + txt : '') + ')');
+    }
     return { name: job.name || ('Order.all.' + job.from.replace(/-/g, '') + '_' + job.to.replace(/-/g, '') + '.xlsx'), blob };
   }
   /** ดึง Order.all ทีละเดือน: ครั้งแรกย้อนหลัง INCOME_BACKFILL_MONTHS เดือน · ครั้งต่อไปทับย้อนหลัง ORDER_OVERLAP_DAYS วัน */
@@ -352,20 +367,29 @@
     if (lastTo) from = addDays(lastTo, -ORDER_OVERLAP_DAYS);
     else { const d = new Date(); d.setMonth(d.getMonth() - INCOME_BACKFILL_MONTHS + 1, 1); from = ymd(d); }
     const chunks = incChunks(from, today);
-    let n = 0, skipped = 0;
-    for (const [a, b] of chunks) {
-      st('[' + shop + '] 🧾 คำสั่งซื้อ (' + (n + skipped + 1) + '/' + chunks.length + ') ' + a + ' → ' + b + '…');
-      let job;
-      try { job = await ordRequest(a, b); }
-      catch (e) { st('[' + shop + '] 🧾 Shopee ให้รอ 1 นาที…'); await sleep(65000); job = await ordRequest(a, b); }   // Shopee จำกัดความถี่ → รอแล้วลองใหม่ 1 ครั้ง
-      if (job.n === 0) { skipped++; GM_setValue('ordTo_' + k, b < today ? b : today); await sleep(3000); continue; }   // เดือนที่ไม่มีออเดอร์
-      const f = await ordFetch(job, m => st('[' + shop + '] 🧾 ' + m));
-      st('[' + shop + '] 🧾 ส่ง ' + f.name + '…');
-      await api('shopeeUpload', { shop, name: f.name, data: await blobToBase64(f.blob), importNow: false });
-      GM_setValue('ordTo_' + k, b < today ? b : today);       // บันทึกทีละไฟล์ → หยุดกลางทางก็ทำต่อได้
-      n++;
-      await sleep(3000);                                       // เว้นระยะ ไม่ถี่เกินไป
+    let n = 0, firstFail = '';
+    const fails = [];
+    for (const [a, b] of chunks) {                             // เดือนไหนพัง → ข้ามไปเดือนถัดไป แล้วรอบหน้าทำเดือนที่พังใหม่
+      try {
+        st('[' + shop + '] 🧾 คำสั่งซื้อ (' + (n + fails.length + 1) + '/' + chunks.length + ') ' + a + ' → ' + b + '…');
+        let job;
+        try { job = await ordRequest(a, b); }
+        catch (e) { st('[' + shop + '] 🧾 Shopee ให้รอ 1 นาที…'); await sleep(65000); job = await ordRequest(a, b); }   // Shopee จำกัดความถี่ → รอแล้วลองใหม่ 1 ครั้ง
+        if (job.n !== 0) {
+          const f = await ordFetch(job, m => st('[' + shop + '] 🧾 ' + m));
+          st('[' + shop + '] 🧾 ส่ง ' + f.name + '…');
+          await api('shopeeUpload', { shop, name: f.name, data: await blobToBase64(f.blob), importNow: false });
+        }
+        n++;
+      } catch (e) {
+        console.warn('[Packing Cam คำสั่งซื้อ] ' + a + ' → ' + b, e);
+        fails.push(a.slice(0, 7) + ': ' + e.message);
+        if (!firstFail) firstFail = a;
+      }
+      if (!firstFail) GM_setValue('ordTo_' + k, b < today ? b : today);   // บันทึกความคืบหน้าถึงก่อนเดือนที่พัง
+      await sleep(3000);
     }
+    if (fails.length) throw new Error('สำเร็จ ' + n + ' เดือน · ไม่สำเร็จ ' + fails.length + ' เดือน (รอบหน้าลองใหม่) – ' + fails[0]);
     return n;
   }
 
@@ -435,6 +459,74 @@
     }
   }
 
+
+  /* ================= 🏪 LnwShop (a.lnwstore.com) → โฟลเดอร์ LnwShop → FIN_ / SALES_ ================= */
+  const LNW_FOLDER = 'LnwShop';                                // ชื่อโฟลเดอร์ใน Drive "Shopee Import/LnwShop"
+  const LNW_CHUNK_DAYS = 7;                                    // ไฟล์ละไม่เกิน 7 วัน (LnwShop ให้สูงสุด 2,000 ออเดอร์ต่อไฟล์)
+  const LNW_OVERLAP_DAYS = 7;
+  const lnwSlug = () => (location.hostname === 'a.lnwstore.com' && location.pathname.split('/')[1]) || '';
+  const onLnw = () => !!lnwSlug() && !/^(pure|static|assets)$/.test(lnwSlug());
+  let lnwRunning = false;
+
+  async function lnwFetch(from, to) {
+    const url = '/' + lnwSlug() + '/pure/lab/order_report/?from_date=' + from + '&to_date=' + to + '&only_active=1&time_key=acceptpayment_time';
+    const r = await fetch(url, { credentials: 'include' });
+    const cd = r.headers.get('content-disposition') || '';
+    if (!r.ok || !/spreadsheet|octet/.test(r.headers.get('content-type') || '')) {
+      const t = (await r.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 100);
+      throw new Error('LnwShop ไม่ส่งไฟล์ (' + from + ' → ' + to + ', HTTP ' + r.status + ')' + (t ? ': ' + t : '') + ' – ล็อกอินใหม่');
+    }
+    const m = cd.match(/order_statement_(\d+)_(\d+)/), n = m ? +m[2] - +m[1] + 1 : -1;
+    return { blob: await r.blob(), n };
+  }
+  /** ดึงช่วงวันที่ · ถ้าเต็ม 2,000 ออเดอร์ (อาจตกหล่น) → แบ่งครึ่งช่วงแล้วดึงใหม่ */
+  async function lnwRange(from, to, st, out) {
+    st('🏪 ดึง LnwShop ' + from + ' → ' + to + '…');
+    const f = await lnwFetch(from, to);
+    if (f.n >= 2000 && from < to) {
+      const days = Math.round((new Date(to + 'T12:00:00') - new Date(from + 'T12:00:00')) / 864e5);
+      const mid = addDays(from, Math.floor(days / 2));
+      await lnwRange(from, mid, st, out); await lnwRange(addDays(mid, 1), to, st, out);
+      return;
+    }
+    out.push({ from, to, blob: f.blob });
+  }
+  async function runLnw(force) {
+    if (lnwRunning) return; lnwRunning = true;
+    const st = msg => { label.textContent = msg; };
+    btn.disabled = true;
+    try {
+      if (!settings(false)) throw new Error('ยังไม่ได้ตั้งค่า');
+      const today = ymd(new Date()), lastTo = GM_getValue('lnwTo', ''), lastOk = +GM_getValue('lnwOk', 0);
+      if (!force && lastTo === today && Date.now() - lastOk < INCOME_SKIP_HOURS * 3600e3) {
+        st('🟢 LnwShop ดึงไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อดึงอีกครั้ง'); return;
+      }
+      let from;
+      if (lastTo) from = addDays(lastTo, -LNW_OVERLAP_DAYS);
+      else { const d = new Date(); d.setMonth(d.getMonth() - INCOME_BACKFILL_MONTHS + 1, 1); from = ymd(d); }
+      const chunks = [];
+      for (let a = from; a <= today; a = addDays(a, LNW_CHUNK_DAYS)) { const b = addDays(a, LNW_CHUNK_DAYS - 1); chunks.push([a, b < today ? b : today]); }
+      let n = 0;
+      for (const [a, b] of chunks) {
+        const files = [];
+        await lnwRange(a, b, m => st('🏪 (' + (n + 1) + '/' + chunks.length + ') ' + m.replace('🏪 ', '')), files);
+        for (const f of files) {
+          st('🏪 (' + (n + 1) + '/' + chunks.length + ') ส่งไฟล์ ' + f.from + ' → ' + f.to + '…');
+          await api('shopeeUpload', { shop: LNW_FOLDER, name: 'order_statement_' + f.from.replace(/-/g, '') + '_' + f.to.replace(/-/g, '') + '.xlsx',
+            data: await blobToBase64(f.blob), importNow: chunks.length === 1 });
+        }
+        GM_setValue('lnwTo', b);                                // บันทึกทีละช่วง → หยุดกลางทางก็ทำต่อได้
+        n++;
+        await sleep(1500);
+      }
+      GM_setValue('lnwOk', Date.now());
+      st('✅ LnwShop ส่ง ' + n + ' ช่วง (' + from + ' → ' + today + ') เวลา ' + new Date().toTimeString().slice(0, 5) + ' • ระบบนำเข้าเข้า FIN_ ภายใน ~10–30 นาที');
+    } catch (e) {
+      st('❌ ' + e.message + (/ไม่พบโฟลเดอร์ร้าน/.test(e.message) ? ' – รอระบบสร้างโฟลเดอร์ LnwShop (~10 นาทีหลังติดตั้ง lnwshop.gs) แล้วลองใหม่' : ''));
+      console.warn('[Packing Cam LnwShop]', e);
+    } finally { lnwRunning = false; btn.disabled = false; }
+  }
+
   /* ---------------- UI ---------------- */
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:99999;display:none;flex-direction:column;align-items:flex-end;gap:6px;font-family:system-ui,-apple-system,sans-serif';
@@ -444,13 +536,16 @@
   const label = document.createElement('div');
   label.style.cssText = 'background:rgba(0,0,0,.8);color:#fff;border-radius:10px;padding:8px 12px;font-size:13px;max-width:380px;line-height:1.5';
   label.textContent = 'กำลังเตรียม…';
-  btn.onclick = () => onIncome() ? runIncome(true) : run('', 'manual');
+  btn.onclick = () => onLnw() ? runLnw(true) : onIncome() ? runIncome(true) : run('', 'manual');
   box.append(label, btn);
   document.body.appendChild(box);
-  let wasIncome = false;
+  let wasIncome = false, wasLnw = false;
   setInterval(() => {
-    box.style.display = onPage() || onIncome() ? 'flex' : 'none';
-    btn.textContent = onIncome() ? '💰 ดึงรายรับ → FIN' : '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
+    box.style.display = onPage() || onIncome() || onLnw() ? 'flex' : 'none';
+    btn.textContent = onLnw() ? '🏪 ดึง LnwShop → FIN' : onIncome() ? '💰 ดึงรายรับ → FIN' : '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
+    const lnw = onLnw();
+    if (lnw && !wasLnw) { label.textContent = '🏪 เตรียมดึง LnwShop…'; setTimeout(() => runLnw(false), 2500); }   // เปิดหลังร้าน LnwShop → ดึงเอง
+    wasLnw = lnw;
     const inc = onIncome();
     if (inc && !wasIncome) { label.textContent = '💰 เตรียมดึงรายรับ…'; setTimeout(() => runIncome(false), 2500); }   // เข้าหน้ารายรับ → ดึงเอง
     wasIncome = inc;
