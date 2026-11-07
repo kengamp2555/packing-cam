@@ -1,0 +1,1704 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Packing Cam</title>
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<style>
+  :root{--bg:#0f1115;--card:#1a1d24;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--txt:#e5e7eb;--mut:#9ca3af;--pri:#2563eb;--find:#7c3aed}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Sarabun",sans-serif}
+  #wrap{max-width:640px;margin:0 auto;padding:8px}
+  #tabs{display:flex;gap:6px;margin-bottom:8px}
+  #tabs button{flex:1;font-size:16px;font-weight:700;padding:12px 4px;white-space:nowrap}
+  body.recv #tabs button#tRecv.on{background:#059669}
+  body.recv #shot{background:#059669;font-size:22px}
+  body.recv #packPanel{display:none}
+  #recvPanel{display:none;margin-top:10px}
+  body.recv #recvPanel{display:block}
+  #recvCard{background:var(--card);border-radius:12px;padding:12px;margin-bottom:8px;font-size:15px;line-height:1.55}
+  #recvCard .big{font-size:19px;font-weight:700;word-break:break-all}
+  #recvCard .ok{color:var(--ok);font-weight:700} #recvCard .warn{color:var(--warn);font-weight:700} #recvCard .bad{color:var(--err);font-weight:700}
+  .rItem{border-top:1px solid #2a2e38;padding-top:6px;margin-top:6px;font-size:14px}
+  .rItem b{color:#fff}
+  /* แท็บรับคืน: ปิดกล้องไว้ก่อน */
+  #camShow{display:none;width:100%;height:64px;font-size:20px;font-weight:700;background:#059669;color:#fff;margin-bottom:4px}
+  #camHide{position:absolute;right:8px;top:52px;z-index:3;display:none;font-size:13px;padding:6px 10px;background:rgba(0,0,0,.55);color:#fff}
+  body.recv #camHide{display:block}
+  body.recv.camOff #camBox,body.recv.camOff #shot,body.recv.camOff #fileBtn{display:none !important}
+  body.recv.camOff #camShow{display:block}
+  /* ตั้งค่า: ปุ่มติดตั้งสคริปต์ */
+  #tmBox{border-top:1px solid #2a2e38;margin-top:14px;padding-top:12px}
+  #tmBox .t{font-weight:700;margin-bottom:4px}
+  .btnLink{flex:1;display:block;text-align:center;text-decoration:none;font-size:16px;padding:12px 14px;border-radius:10px;background:#ee4d2d;color:#fff;font-weight:700}
+  .btnLink.alt{background:var(--card);color:var(--txt);font-weight:400}
+  #recvListBtns{display:flex;gap:6px;margin-bottom:8px}
+  #recvListBtns button{flex:1}
+  #recvListBtns button.on{background:#334155;color:#fff;font-weight:700;box-shadow:inset 0 -3px 0 #059669}
+  #recvList .okBadge{color:var(--ok);font-weight:700}
+  #recvList .wait{color:var(--warn);font-weight:700}
+  #recvList .photoBtn{display:inline-block;margin-top:6px;padding:6px 12px;border-radius:8px;background:#1f3a68;color:#fff;font-size:13px;cursor:pointer}
+  #recvMsg{color:var(--mut);margin:4px 2px 8px;font-size:14px}
+  /* สีแพลตฟอร์ม: Lazada = ตัวหนังสือฟ้า, Shopee = แถบส้ม */
+  .lzTxt{color:#60a5fa;font-weight:800}
+  .spBar{display:inline-block;background:#ee4d2d;color:#fff;font-weight:800;padding:0 8px;border-radius:6px}
+  #recvList li.pf-lz,#recvCard .rItem.pf-lz{border-left:4px solid #3b82f6;padding-left:10px}
+  #recvList li.pf-sp,#recvCard .rItem.pf-sp{border-left:4px solid #ee4d2d;padding-left:10px}
+  #recvFilter button[data-f="Lazada"]{color:#60a5fa}
+  #recvFilter button[data-f="Shopee"]{color:#fb923c}
+  #recvFilter button.on[data-f="Lazada"]{background:#1d4ed8;color:#fff}
+  #recvFilter button.on[data-f="Shopee"]{background:#ee4d2d;color:#fff}
+  /* นำเข้าไฟล์ Shopee */
+  #spBox{background:var(--card);border-radius:12px;padding:10px;margin-bottom:8px;border-left:4px solid #ee4d2d}
+  #spBox .t{font-weight:700;margin-bottom:6px}
+  #spShops{display:flex;flex-wrap:wrap;gap:6px}
+  #spShops .spShop{flex:1 1 45%;display:flex;flex-direction:column;align-items:stretch;gap:4px}
+  .spManual{color:var(--mut);font-size:12px;text-align:center;text-decoration:underline;padding:2px}
+  .spTab{color:var(--mut);font-size:12px;text-align:center}
+  #spShops button:disabled{opacity:.75}
+  #spShops button{flex:1 1 45%;background:#ee4d2d;color:#fff;font-weight:700;padding:12px 6px}
+  #spShops button small{display:block;font-weight:400;font-size:12px;opacity:.9}
+  #spMsg{color:var(--mut);font-size:13px;margin-top:6px;line-height:1.5}
+  #recvFilter{display:none;gap:6px;margin-bottom:6px}
+  #recvFilter button{flex:1;padding:9px 6px;font-size:15px}
+  #recvFilter button.on{background:#059669;color:#fff;font-weight:700}
+  #recvList li{background:var(--card);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:13px;line-height:1.5}
+  #recvList .days{font-weight:700;color:var(--warn)}
+  #recvList .trk{font-weight:700;color:#fff;word-break:break-all}
+  .itemList{list-style:none;margin:6px 0 0;padding:6px 0 0;border-top:1px dashed #2f3440}
+  #recvList .itemList li,#recvCard .itemList li{position:relative;padding:2px 0 2px 14px;margin:0;background:none;border-radius:0;font-size:13px;line-height:1.45;color:#d1d5db}
+  .itemList li::before{content:'•';position:absolute;left:2px;color:var(--mut)}
+  .itemList .qty{display:inline-block;margin-left:4px;padding:0 7px;border-radius:999px;background:#059669;color:#fff;font-weight:700;font-size:12px}
+  #tabs button#cfg,#tabs button#magBtn{flex:0 0 52px;padding:12px 0;font-size:20px}
+  /* แว่นขยาย */
+  #mag{position:fixed;inset:0;background:#000;z-index:16;display:none;flex-direction:column}
+  #magView{flex:1;overflow:hidden;position:relative;touch-action:none}
+  #magVideo,#magFreeze{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;transform-origin:center center}
+  #magFreeze{display:none}
+  #magHint{position:absolute;left:8px;right:8px;top:8px;z-index:1;text-align:center;font-size:13px;color:#ddd;background:rgba(0,0,0,.55);padding:6px 8px;border-radius:8px;pointer-events:none}
+  #magCtl{padding:10px 10px 26px;background:#111}
+  #magCtl .zrow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  #magCtl .zrow input{flex:1}
+  #magZVal{font-weight:700;min-width:46px;text-align:right}
+  #magCtl .brow{display:flex;gap:8px}
+  #magCtl .brow button{flex:1;font-size:17px;padding:14px 6px}
+  #magTorch.on{background:#facc15;color:#000;font-weight:700}
+  #magTorch.na{opacity:.45}
+  #magFreezeBtn.on{background:var(--pri);color:#fff;font-weight:700}
+  #tabs button.on{background:var(--pri);color:#fff}
+  body.find #tabs button#tFind.on{background:var(--find)}
+  #camBox{position:relative;width:100%;aspect-ratio:var(--camAR,1/1);background:#000;border-radius:12px;overflow:hidden}
+  /* รูปล่าสุดมุมขวาล่างของภาพสด */
+  #pip{position:absolute;right:8px;bottom:8px;width:30%;border:2px solid #fff;border-radius:8px;overflow:hidden;pointer-events:none;display:none;background:#000;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+  #pip img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover}
+  #pipInfo{text-align:center;padding:3px 3px 4px;background:#000}
+  #pipCode{color:#fff;font-size:11px;font-weight:700;line-height:1.25;word-break:break-all}
+  #pipSt{font-size:12px;font-weight:700}
+  #pipSt.done{color:var(--ok)} #pipSt.pending{color:var(--warn)} #pipSt.retry{color:var(--err)}
+  body.find #pip{display:none !important}
+  @keyframes pop{from{transform:scale(1.25)}to{transform:scale(1)}}
+  #pip.pop{animation:pop .25s ease-out}
+  body.find #camBox{aspect-ratio:4/3}
+  video{width:100%;height:100%;object-fit:cover;display:block}
+  #guide{position:absolute;left:6%;right:6%;top:32%;height:36%;border:2px dashed rgba(255,255,255,.75);border-radius:10px;pointer-events:none;display:flex;align-items:flex-end;justify-content:center}
+  #guide span{background:rgba(0,0,0,.55);color:#fff;font-size:13px;padding:3px 8px;border-radius:6px;margin-bottom:-26px}
+  #flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .12s}
+  #bcTag{position:absolute;left:8px;top:8px;right:8px;padding:8px 12px;border-radius:8px;background:rgba(0,0,0,.6);font-size:20px;font-weight:700;word-break:break-all}
+  #bcTag.found{background:rgba(34,197,94,.9)}
+  #zoomBox{position:absolute;left:12px;right:calc(30% + 20px);bottom:10px;display:none;align-items:center;gap:8px;background:rgba(0,0,0,.5);padding:6px 10px;border-radius:10px}
+  #zoomBox input{flex:1}
+  #zoomVal{font-weight:700;min-width:42px;text-align:right}
+  #startCam{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:22px;padding:18px 24px;background:var(--pri);color:#fff;display:none}
+  .row{display:flex;gap:8px;margin-top:8px;align-items:center}
+  .row label{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:15px;white-space:nowrap}
+  input[type=text],input[type=url],select{font-size:17px;padding:12px;border-radius:10px;border:1px solid #333;background:var(--card);color:var(--txt)}
+  .row input[type=text]{flex:1;min-width:0}
+  button{font-size:16px;padding:12px 14px;border:0;border-radius:10px;background:var(--card);color:var(--txt)}
+  #shot{width:100%;height:76px;font-size:26px;font-weight:700;background:var(--pri);color:#fff;margin-top:8px}
+  body.find #shot{background:var(--find)}
+  #shot:active{transform:scale(.98)}
+  #fileBtn{display:none;width:100%;margin-top:8px}
+  #stats{display:flex;gap:12px;justify-content:space-between;color:var(--mut);margin:10px 2px;font-size:14px}
+  #stats b{color:var(--txt)}
+  ul{list-style:none;padding:0;margin:0}
+  /* รูปล่าสุด – กดอะไรไม่ได้ กันมือโดน */
+  #lastBox{pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;background:var(--card);border-radius:12px;padding:8px;display:none}
+  #lastImg{display:block;width:100%;max-height:55vh;object-fit:contain;border-radius:8px;background:#000}
+  #lastName{font-size:16px;font-weight:700;margin-top:8px;word-break:break-all}
+  #lastSt{font-size:15px;font-weight:700;margin-top:2px}
+  #lastSt.pending{color:var(--warn)} #lastSt.done{color:var(--ok)} #lastSt.retry{color:var(--err)}
+  #warn{display:none;color:#fecaca;background:#4a1d1d;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;pointer-events:none}
+  /* ดูรูปในหน้าค้นหา */
+  #results li{cursor:pointer}
+  #results li:active{background:#242833}
+  #viewer{position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:15;display:none;flex-direction:column}
+  #vTop{display:flex;align-items:center;gap:8px;padding:10px}
+  #vTitle{flex:1;min-width:0;font-size:14px;word-break:break-all}
+  #vImgWrap{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;-webkit-overflow-scrolling:touch}
+  #vImg{max-width:100%;max-height:100%;object-fit:contain}
+  #vMsg{color:var(--mut);padding:20px;text-align:center}
+  #vBottom{display:flex;gap:8px;padding:10px 10px 24px}
+  #vBottom button{flex:1;font-size:17px;padding:14px}
+  #vDel{background:#7f1d1d;color:#fff;font-weight:700}
+  #findPanel{display:none;margin-top:10px}
+  body.find #findPanel{display:block}
+  body.find #packPanel{display:none}
+  #findMsg{color:var(--mut);margin:4px 2px 8px;font-size:15px}
+  #results li{background:var(--card);border-radius:10px;padding:10px;margin-bottom:6px}
+  #results .bc{font-size:17px;font-weight:700;word-break:break-all}
+  #results .meta{color:var(--mut);font-size:13px;margin:2px 0 8px}
+  #results .acts{display:flex;gap:8px}
+  #results .acts button,#results .acts a{flex:1;text-align:center;font-size:15px;padding:10px;border-radius:8px;text-decoration:none}
+  #results .open{background:#1f3a68;color:#fff}
+  #results .del{background:#4a1d1d;color:#fecaca}
+  #results .gone{color:var(--err);font-weight:700}
+  /* หน้าตั้งค่า */
+  #setBg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;justify-content:center;z-index:10}
+  #setBox{background:#14171d;width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px 28px}
+  #setBox h3{margin:0 0 12px;font-size:20px}
+  .f{display:block;margin-bottom:14px;color:var(--mut);font-size:14px}
+  .f select,.f input{display:block;width:100%;margin-top:6px}
+  .chk{display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:16px}
+  .chk input{width:22px;height:22px}
+  .hint{color:var(--mut);font-size:12px;margin-top:4px;line-height:1.4}
+  #setBox .btns{display:flex;gap:8px;margin-top:6px}
+  #setBox .btns button{flex:1}
+  #sSave{background:var(--pri);color:#fff;font-weight:700}
+  #camInfo{color:var(--mut);font-size:12px;margin-top:12px;word-break:break-word;line-height:1.5}
+  /* หน้าจอพัก (สีดำล้วน – จอ OLED ของ iPhone แทบไม่กินไฟ) */
+  #rest{position:fixed;inset:0;background:#000;z-index:20;display:none;align-items:center;justify-content:center;text-align:center;touch-action:none}
+  #restMsg{color:#777;font-size:17px;line-height:1.6;transition:opacity 1.5s}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="tabs">
+    <button id="tPack" class="on">📦 แพค</button>
+    <button id="tFind">🔍 ค้นหา</button>
+    <button id="tRecv">📥 รับคืน</button>
+    <button id="magBtn">🔎</button>
+    <button id="cfg">⚙️</button>
+  </div>
+
+  <div id="camBox">
+    <video id="video" playsinline muted autoplay></video>
+    <div id="guide"><span>วางบาร์โค้ดในกรอบ • ห่างประมาณ 20–30 ซม.</span></div>
+    <div id="bcTag">กำลังเปิดกล้อง…</div>
+    <div id="pip"><img id="pipImg" alt=""><div id="pipInfo"><div id="pipCode"></div><div id="pipSt"></div></div></div>
+    <div id="zoomBox">🔍<input id="zoom" type="range"><span id="zoomVal">1.0x</span></div>
+    <div id="flash"></div>
+    <button id="startCam">📷 แตะเพื่อเปิดกล้อง</button>
+    <button id="camHide">✕ ปิดกล้อง</button>
+  </div>
+  <button id="camShow">📷 เปิดกล้องสแกนรับของ</button>
+
+  <div class="row">
+    <input id="bc" type="text" placeholder="Barcode (สแกน/พิมพ์เองได้)" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+    <button id="clr">✕</button>
+    <label><input id="auto" type="checkbox"> อัตโนมัติ</label>
+  </div>
+
+  <button id="shot">📷 ถ่าย</button>
+  <button id="fileBtn">📷 ถ่ายด้วยแอปกล้อง</button>
+  <input id="fileIn" type="file" accept="image/*" capture="environment" hidden>
+
+  <div id="packPanel">
+    <div id="stats">
+      <span>รอส่ง <b id="sPend">0</b></span>
+      <span>สำเร็จ <b id="sDone">0</b></span>
+      <span>กำลังลองใหม่ <b id="sErr">0</b></span>
+    </div>
+    <div id="warn"></div>
+    <div id="lastBox">
+      <img id="lastImg" alt="">
+      <div id="lastName"></div>
+      <div id="lastSt"></div>
+    </div>
+  </div>
+
+  <div id="recvPanel">
+    <div id="recvCard">📥 สแกนบาร์โค้ด <b>เลขพัสดุ</b> ที่กล่องตีกลับ<br>ระบบจะบอกว่าเป็นออเดอร์ไหน แล้วกด "ยืนยันรับของ" (ถ่ายรูปสภาพของไว้ด้วย)</div>
+    <div id="recvListBtns">
+      <button id="recvPendBtn">📋 ยังไม่ได้รับของ</button>
+      <button id="recvDoneBtn">✅ รับคืนแล้ว</button>
+    </div>
+    <div id="spBox">
+      <div class="t"><span class="spBar">Shopee</span> นำเข้าไฟล์คืนสินค้า/ตีกลับ</div>
+      <div id="spShops"><button id="spLoad" style="flex:1 1 100%">⬆️ โหลดรายชื่อร้าน</button></div>
+      <div id="spMsg">ส่งออกไฟล์ (zip) จาก Seller Centre แล้วกดปุ่มของร้านนั้นเพื่ออัปโหลด</div>
+      <input id="spFile" type="file" accept=".zip,.xlsx,.xls,application/zip" multiple hidden>
+    </div>
+    <div id="recvFilter">
+      <button data-f="" class="on">ทั้งหมด</button>
+      <button data-f="Lazada">Lazada</button>
+      <button data-f="Shopee">Shopee</button>
+    </div>
+    <div id="recvMsg"></div>
+    <ul id="recvList"></ul>
+  </div>
+
+  <div id="findPanel">
+    <div id="findMsg">กำลังโหลดรายการล่าสุด…</div>
+    <ul id="results"></ul>
+  </div>
+</div>
+
+<div id="mag">
+  <div id="magView">
+    <div id="magHint">ลากนิ้วเพื่อเลื่อนภาพ • ถ้าภาพเบลอ ให้ถอยเครื่องออก (~10 ซม.) แล้วใช้ซูมแทน</div>
+    <video id="magVideo" playsinline muted autoplay></video>
+    <canvas id="magFreeze"></canvas>
+  </div>
+  <div id="magCtl">
+    <div class="zrow">🔍<input id="magZoom" type="range" min="1" max="8" step="0.1" value="3"><span id="magZVal">3.0x</span></div>
+    <div class="brow">
+      <button id="magTorch">🔦 ไฟฉาย</button>
+      <button id="magFreezeBtn">⏸ หยุดภาพ</button>
+      <button id="magClose">✕ ปิด</button>
+    </div>
+  </div>
+</div>
+
+<div id="viewer">
+  <div id="vTop"><div id="vTitle"></div><button id="vClose">✕ ปิด</button></div>
+  <div id="vImgWrap"><img id="vImg" alt=""><div id="vMsg"></div></div>
+  <div id="vBottom"><button id="vDel">🗑 ลบถาวร</button></div>
+</div>
+
+<div id="rest"><div id="restMsg">💤 พักหน้าจอ<br>หยิบเครื่อง หรือแตะจอ เพื่อถ่ายต่อ</div></div>
+
+<!-- ===== หน้าตั้งค่า ===== -->
+<div id="setBg">
+  <div id="setBox">
+    <h3>⚙️ ตั้งค่า</h3>
+    <label class="f">ชื่อพนักงาน (บันทึกว่าใครรับของคืน)
+      <input id="sStaff" type="text" autocorrect="off" spellcheck="false" placeholder="เช่น ต้น">
+    </label>
+    <label class="chk"><input type="checkbox" id="sBeep"> เสียง "ติ๊ด" เมื่อสแกนเจอบาร์โค้ด</label>
+    <label class="chk"><input type="checkbox" id="sShutter"> เสียง "แชะ" เมื่อถ่ายรูป</label>
+    <label class="f">ขนาดภาพกล้องสด
+      <select id="sCamSize">
+        <option value="3 / 4">ใหญ่ (สูง)</option>
+        <option value="1 / 1">กลาง (สี่เหลี่ยมจัตุรัส)</option>
+        <option value="4 / 3">เล็ก</option>
+        <option value="16 / 9">เล็กมาก</option>
+      </select>
+      <div class="hint">ภาพเล็กลง = เห็นรูปล่าสุดด้านล่างได้มากขึ้น (ไม่มีผลกับความชัดของรูปที่บันทึก)</div>
+    </label>
+    <label class="f">ความชัดของรูปถ่าย
+      <select id="sQuality"></select>
+      <div class="hint">ชัดมากขึ้น = ไฟล์ใหญ่ขึ้น ส่งช้าลง และใช้พื้นที่ Drive มากขึ้น</div>
+    </label>
+    <label class="f">กล้อง
+      <select id="sCamera"><option value="auto">อัตโนมัติ (แนะนำ)</option></select>
+      <div class="hint">iPhone รุ่น Pro: ถ้าโฟกัสบาร์โค้ดใกล้ ๆ ไม่ได้ ให้เลือกกล้องที่มีคำว่า "Triple" / "Dual Wide" (สลับเลนส์ macro ให้เอง) หรือ "Ultra Wide"</div>
+    </label>
+    <label class="f">พักหน้าจอเมื่อวางเครื่องนิ่ง
+      <select id="sRest">
+        <option value="0">ไม่พักหน้าจอ</option>
+        <option value="1">หลัง 1 วินาที</option>
+        <option value="2">หลัง 2 วินาที</option>
+        <option value="3">หลัง 3 วินาที</option>
+        <option value="4">หลัง 4 วินาที</option>
+        <option value="5">หลัง 5 วินาที</option>
+        <option value="10">หลัง 10 วินาที</option>
+      </select>
+      <div class="hint">วางเครื่องนิ่งตามเวลาที่ตั้ง จอจะดำ • หยิบเครื่องขึ้นมา (เซนเซอร์จับการเคลื่อนไหว) หรือแตะจอ จะกลับมาถ่ายต่อทันที</div>
+    </label>
+    <label class="f">ความไวในการปลุกเมื่อหยิบเครื่อง
+      <select id="sSens">
+        <option value="0">ปิดเซนเซอร์ – แตะจอเพื่อปลุกเท่านั้น (เหมาะกับโต๊ะที่สั่น)</option>
+        <option value="1">1 – ต่ำมาก (ต้องยกเครื่องชัด ๆ)</option>
+        <option value="2">2 – ต่ำ</option>
+        <option value="3">3 – ปานกลาง (แนะนำ)</option>
+        <option value="4">4 – สูง</option>
+        <option value="5">5 – สูงมาก (ขยับนิดเดียวก็ตื่น)</option>
+      </select>
+      <div class="hint">ถ้าตื่นเองตอนโต๊ะสั่น → ลดความไว • ถ้าหยิบแล้วไม่ตื่น → เพิ่มความไว<br>ค่าการเคลื่อนไหวตอนนี้: <b id="motionNow">-</b> (ตัวเลขเกิน <b id="motionNeed">-</b> = ปลุก)</div>
+    </label>
+    <label class="f">กล้องระหว่างพักหน้าจอ
+      <select id="sRestCam">
+        <option value="0">เปิดค้างไว้ – หยิบแล้วถ่ายได้ทันที (ไอคอนกล้องค้างอยู่)</option>
+        <option value="1">ปิดกล้อง – ไอคอนหาย ประหยัดแบต (หยิบแล้วรอ ~0.5–1 วิ)</option>
+      </select>
+      <div class="hint">ถ้าเลือก "ปิดกล้อง" ควรตั้ง Safari → การตั้งค่าเว็บไซต์ → กล้อง → อนุญาต ไว้ก่อน ไม่อย่างนั้นอาจถามสิทธิ์กล้องทุกครั้งที่หยิบเครื่อง</div>
+    </label>
+    <label class="chk"><input type="checkbox" id="sWake"> ไม่ให้ iPhone ล็อกเครื่องเอง</label>
+    <div class="hint" style="margin:-8px 0 14px">ถ้าเปิด "พักหน้าจอ" ระบบจะกันไม่ให้ล็อกเครื่องให้อัตโนมัติ เพราะถ้า iPhone ล็อก เซนเซอร์และกล้องจะหยุดทำงาน</div>
+    <div id="connBox">
+      <label class="f">ลิงก์ Apps Script (ลงท้ายด้วย /exec)
+        <input id="sUrl" type="url" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </label>
+      <label class="f">รหัส API_TOKEN
+        <input id="sToken" type="text" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </label>
+    </div>
+    <div class="btns">
+      <button id="sTest">ทดสอบการเชื่อมต่อ</button>
+      <button id="sSave">บันทึก</button>
+    </div>
+    <div id="tmBox">
+      <div class="t">🧩 สคริปต์ Tampermonkey (ดึงไฟล์ Shopee อัตโนมัติ)</div>
+      <div class="hint">ใช้ตอนตั้งเครื่อง Mac ใหม่/โปรไฟล์ Chrome ใหม่: ติดตั้งส่วนขยาย Tampermonkey ก่อน แล้วกดปุ่มด้านล่าง → Tampermonkey จะเปิดหน้าติดตั้งให้ กด "ติดตั้ง" (Install) ได้เลย</div>
+      <div class="btns">
+        <a id="tmInstall" class="btnLink" target="_blank" rel="noopener">⬇️ ติดตั้งสคริปต์</a>
+        <a id="tmDownload" class="btnLink alt" download="shopee-autoexport.user.js">💾 ดาวน์โหลดไฟล์</a>
+      </div>
+      <div class="hint" id="tmVer"></div>
+    </div>
+    <div id="camInfo"></div>
+  </div>
+</div>
+
+<script>
+/* ===== ระดับความชัด ===== */
+const QP = {
+  eco:    { label: 'ประหยัด – เร็วสุด (~100 KB/รูป)', maxW: 1024, q: 0.60, stream: 1280 },
+  normal: { label: 'ปกติ (~200 KB/รูป)',             maxW: 1600, q: 0.75, stream: 1920 },
+  high:   { label: 'ชัด (~400 KB/รูป)',               maxW: 1920, q: 0.85, stream: 1920 },
+  max:    { label: 'ชัดมาก (~0.8–1 MB/รูป)',          maxW: 3840, q: 0.90, stream: 3840 }
+};
+const CONCURRENCY = 3;     // อัปโหลดพร้อมกันกี่รูป
+const STALE_MS = 3000;     // บาร์โค้ดที่ไม่เห็นเกินเวลานี้ถือว่าเก่า
+
+/* ===== ค่าที่จำไว้ในเครื่อง ===== */
+const IN_GAS = !!(window.google && google.script && google.script.run);
+let S = { quality: 'normal', camera: 'auto', wake: true, zoom: 0, rest: 3, restCam: false, sens: 3, camSize: '1 / 1', beep: true, shutter: true };
+let API_URL = '', API_TOKEN = '';
+try {
+  Object.assign(S, JSON.parse(localStorage.getItem('pc_settings') || '{}'));
+  API_URL = normalizeApiUrl(localStorage.getItem('pc_url') || '');
+  API_TOKEN = localStorage.getItem('pc_token') || '';
+} catch (e) {}
+
+/* แปลงลิงก์ Apps Script รูปแบบไหนก็ได้ (มี / ต่อท้าย, ?..., /dev, /a/macros/โดเมน/...) → https://script.google.com/macros/s/<ID>/exec */
+function normalizeApiUrl(u) {
+  u = String(u || '').trim().replace(/[\s​-‍﻿]+/g, '');   // ตัดช่องว่าง/อักขระล่องหนที่ติดมาตอนคัดลอก
+  const a = u.match(/\/a\/macros\/([^/]+)\/s\/([A-Za-z0-9_-]{20,})/);              // บัญชี Google Workspace
+  if (a) return 'https://script.google.com/a/macros/' + a[1] + '/s/' + a[2] + '/exec';
+  const m = u.match(/\/macros\/(?:u\/\d+\/)?s\/([A-Za-z0-9_-]{20,})/);
+  return m ? 'https://script.google.com/macros/s/' + m[1] + '/exec' : u;
+}
+if (!QP[S.quality]) S.quality = 'normal';
+function saveS() { try { localStorage.setItem('pc_settings', JSON.stringify(S)); } catch (e) {} }
+function applyCamSize() { document.documentElement.style.setProperty('--camAR', S.camSize || '1 / 1'); }
+applyCamSize();
+
+const $ = id => document.getElementById(id);
+const video = $('video'), bcInput = $('bc'), bcTag = $('bcTag');
+const scanCanvas = document.createElement('canvas');
+const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+const shotCanvas = document.createElement('canvas');
+const shotCtx = shotCanvas.getContext('2d');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let mode = 'pack';
+let detector = null, zxFast = null, zxHard = null;
+let live = { code: '', at: 0, hits: 0 };
+let lastShot = { code: '', at: 0 };
+let lastFind = '';
+let manual = false;
+let deletePin = '';
+let settingsOpen = false;
+
+/* ===== สลับโหมด ===== */
+function setMode(m) {
+  mode = m;
+  document.body.classList.toggle('find', m === 'find');
+  document.body.classList.toggle('recv', m === 'recv');
+  $('tPack').classList.toggle('on', m === 'pack');
+  $('tFind').classList.toggle('on', m === 'find');
+  $('tRecv').classList.toggle('on', m === 'recv');
+  $('shot').textContent = m === 'pack' ? '📷 ถ่าย' : m === 'find' ? '🔍 ค้นหา' : '📥 ยืนยันรับของ + ถ่ายรูป';
+  $('fileBtn').textContent = m === 'pack' ? '📷 ถ่ายด้วยแอปกล้อง' : '📷 ถ่ายบาร์โค้ดด้วยแอปกล้อง';
+  bcInput.value = ''; manual = false; live.hits = 0; lastFind = ''; lastLookup = '';
+  setCamOff(m === 'recv');                     // เข้าแท็บรับคืน → ปิดกล้องไว้ก่อน · แท็บอื่นเปิดกล้อง
+}
+
+/* ปิด/เปิดภาพกล้อง (หยุดภาพไว้ ไม่ปิดสิทธิ์กล้อง → ไม่ถามสิทธิ์ใหม่) */
+let camOff = false;
+function setCamOff(off) {
+  camOff = off;
+  document.body.classList.toggle('camOff', off);
+  if (track) track.enabled = !off;
+  if (!off) {
+    if (!track || track.readyState === 'ended') initCamera();
+    else if (video.paused) video.play().catch(() => {});
+  }
+}
+$('camShow').onclick = () => setCamOff(false);
+$('camHide').onclick = () => setCamOff(true);
+
+/* ปุ่มติดตั้ง/ดาวน์โหลดสคริปต์ Tampermonkey (ไฟล์อยู่ข้าง index.html บน Netlify) */
+const TM_FILE = 'shopee-autoexport.user.js';
+function fillTampermonkey() {
+  if (IN_GAS) {                                      // เปิดผ่านลิงก์ Apps Script → ไม่มีไฟล์สคริปต์ให้
+    $('tmBox').querySelector('.hint').textContent = 'เปิดแอปจากลิงก์ Netlify เพื่อติดตั้งสคริปต์ Tampermonkey';
+    $('tmBox').querySelector('.btns').style.display = 'none';
+    return;
+  }
+  const url = new URL(TM_FILE, location.href).href;
+  $('tmInstall').href = url;
+  $('tmDownload').href = url;
+  $('tmVer').textContent = '';
+  fetch(url, { cache: 'no-store' }).then(r => r.ok ? r.text() : Promise.reject())
+    .then(t => { const v = (t.match(/@version\s+([\d.]+)/) || [])[1]; $('tmVer').textContent = v ? 'เวอร์ชันบนเซิร์ฟเวอร์: v' + v : ''; })
+    .catch(() => { $('tmVer').textContent = '⚠️ ยังไม่พบไฟล์สคริปต์บน Netlify – อัปโหลดไฟล์ zip ชุดล่าสุด'; });
+}
+
+$('tPack').onclick = () => setMode('pack');
+let shopsLoaded = false;
+$('tRecv').onclick = () => { setMode('recv'); if (!shopsLoaded) { shopsLoaded = true; loadShops(); } };
+$('tFind').onclick = () => { setMode('find'); doSearch('', true); };   // เปิดแท็บแล้วโชว์รายการล่าสุดทันที
+
+/* ===== กล้อง ===== */
+let stream = null, track = null, starting = false, scanning = false;
+
+function stopStream() {
+  if (stream) stream.getTracks().forEach(t => { t.onended = null; t.stop(); });
+  stream = null; track = null;
+}
+
+async function listCams() {
+  try { return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); }
+  catch (e) { return []; }
+}
+
+/* iPhone Pro: กล้องเสมือน "Triple/Dual Wide" สลับไปเลนส์ macro ให้เองเมื่อถือใกล้ (เหมือนแอปกล้อง) */
+async function preferredCameraId() {
+  const cams = (await listCams()).filter(c => !/front|หน้า/i.test(c.label));
+  for (const re of [/triple|สาม/i, /dual wide|คู่แบบกว้าง/i, /dual|คู่/i]) {
+    const d = cams.find(c => re.test(c.label));
+    if (d) return d.deviceId;
+  }
+  return null;
+}
+
+async function getStream(deviceId) {
+  const p = QP[S.quality];
+  const base = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } };
+  const tries = [
+    Object.assign({ width: { ideal: p.stream }, height: { ideal: Math.round(p.stream * 0.75) } }, base),
+    base
+  ];
+  let err;
+  for (const c of tries) {
+    try { return await navigator.mediaDevices.getUserMedia({ video: c, audio: false }); } catch (e) { err = e; }
+  }
+  throw err;
+}
+
+async function initCamera() {
+  if (starting) return;
+  starting = true;
+  $('startCam').style.display = 'none';
+  bcTag.textContent = 'กำลังเปิดกล้อง…';
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('no camera api');
+    stopStream();
+    video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('muted', ''); video.muted = true; video.setAttribute('autoplay', '');
+
+    // เปิดกล้องตัวที่เคยใช้ได้ผลโดยตรง (ขอสิทธิ์ครั้งเดียว ไม่ต้องเปิดซ้ำเพื่อสลับกล้อง)
+    const wanted = S.camera !== 'auto' ? S.camera : (S.lastCamId || null);
+    try { stream = await getStream(wanted); }
+    catch (e) {
+      if (!wanted) throw e;
+      if (S.camera !== 'auto') S.camera = 'auto';
+      S.lastCamId = ''; saveS();
+      stream = await getStream(null);
+    }
+
+    if (S.camera === 'auto' && !S.lastCamId) {        // ครั้งแรกเท่านั้น: หากล้องที่โฟกัสใกล้ได้ดีที่สุด
+      const id = await preferredCameraId();
+      const cur = stream.getVideoTracks()[0].getSettings().deviceId;
+      if (id && id !== cur) {
+        stopStream();
+        try { stream = await getStream(id); } catch (e) { stream = await getStream(null); }
+      }
+    }
+    if (S.camera === 'auto') {
+      const used = stream.getVideoTracks()[0].getSettings().deviceId;
+      if (used && used !== S.lastCamId) { S.lastCamId = used; saveS(); }
+    }
+
+    track = stream.getVideoTracks()[0];
+    track.onended = () => { if (!document.hidden) initCamera(); };
+    if (camOff) track.enabled = false;                        // แท็บรับคืนที่ปิดกล้องไว้
+    video.srcObject = stream;
+    await new Promise(r => { if (video.readyState >= 1) r(); else video.onloadedmetadata = r; });
+    await video.play();
+    await tuneTrack();
+    await sleep(400);
+    if (!video.videoWidth || video.paused) throw new Error('black');
+
+    bcTag.textContent = 'กำลังค้นหาบาร์โค้ด…';
+    $('shot').style.display = ''; $('fileBtn').style.display = 'none';
+    if (!scanning) { scanning = true; scanLoop(); }
+    keepAwake();
+    showCamInfo();
+  } catch (e) {
+    bcTag.textContent = 'เปิดกล้องสดไม่ได้ – แตะปุ่มเพื่อลองใหม่ หรือใช้ "ถ่ายด้วยแอปกล้อง"';
+    $('startCam').style.display = 'block';
+    $('fileBtn').style.display = 'block';
+  } finally {
+    starting = false;
+  }
+}
+$('startCam').onclick = initCamera;
+
+/* โฟกัสต่อเนื่อง + ซูม (ถ้าเครื่อง/เบราว์เซอร์รองรับ) */
+async function tuneTrack() {
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (caps.focusMode && caps.focusMode.includes('continuous')) {
+    try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+  }
+  const z = $('zoom');
+  if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+    z.min = caps.zoom.min; z.max = Math.min(caps.zoom.max, 6); z.step = caps.zoom.step || 0.1;
+    z.value = Math.min(Math.max(S.zoom || caps.zoom.min, caps.zoom.min), z.max);
+    $('zoomBox').style.display = 'flex';
+    applyZoom();
+  } else {
+    $('zoomBox').style.display = 'none';
+  }
+}
+function applyZoom() {
+  const v = +$('zoom').value;
+  S.zoom = v; saveS();
+  $('zoomVal').textContent = v.toFixed(1) + 'x';
+  if (track) track.applyConstraints({ advanced: [{ zoom: v }] }).catch(() => {});
+}
+$('zoom').oninput = applyZoom;
+
+function showCamInfo() {
+  $('camInfo').innerHTML =
+    (track ? 'กล้องที่ใช้: ' + esc(track.label || '-') + ' • ' + video.videoWidth + '×' + video.videoHeight : 'กล้อง: ปิดอยู่') +
+    '<br>เซนเซอร์การเคลื่อนไหว: ' + (!needMotion() ? '⏸ ไม่ได้ใช้ (ปลุกด้วยการแตะจอ – ไม่ขอสิทธิ์)'
+      : motionOK ? '✅ ใช้งานได้' : '⚠️ ยังไม่ทำงาน – แตะจอ 1 ครั้งแล้วกด "อนุญาต"');
+}
+
+/* ===== พักหน้าจอเมื่อวางเครื่อง / หยิบขึ้นมาแล้วกลับมาถ่ายทันที ===== */
+let resting = false, lastActive = Date.now();
+let motionOK = false, motionAsked = false, base = null;
+
+function markActive() { lastActive = Date.now(); }
+
+function onMotion(e) {
+  motionOK = true;
+  const a = e.accelerationIncludingGravity || {};
+  const r = e.rotationRate || {};
+  const rot = Math.max(Math.abs(r.alpha || 0), Math.abs(r.beta || 0), Math.abs(r.gamma || 0)); // องศา/วินาที
+  let d = 0;
+  if (a.x != null) {
+    if (!base) base = { x: a.x, y: a.y, z: a.z };
+    d = Math.abs(a.x - base.x) + Math.abs(a.y - base.y) + Math.abs(a.z - base.z);
+    base.x += (a.x - base.x) * 0.1; base.y += (a.y - base.y) * 0.1; base.z += (a.z - base.z) * 0.1;
+  }
+  const m = Math.max(rot, d * 20);                     // ค่าการเคลื่อนไหวรวม
+  const t = SENS[S.sens] || SENS[3];
+  if (m > motionPeak) motionPeak = m;
+  if (resting) { if (m > t.wake) wake(); }            // หยิบขึ้นมา
+  else if (m > t.active) markActive();                // ยังถืออยู่ในมือ
+}
+
+/* ความไว: wake = ค่าที่ต้องเกินเพื่อปลุก, active = ค่าที่ถือว่ายังถืออยู่ (ไม่พัก) */
+const SENS = {
+  0: { wake: Infinity, active: 7 },   // แตะจอเท่านั้น
+  1: { wake: 35, active: 7 },
+  2: { wake: 24, active: 5 },
+  3: { wake: 16, active: 3.5 },
+  4: { wake: 10, active: 2.5 },
+  5: { wake: 6,  active: 1.8 }
+};
+let motionPeak = 0;
+setInterval(() => {                                    // แสดงค่าแบบสด ๆ ในหน้าตั้งค่า
+  if (settingsOpen) {
+    $('motionNow').textContent = motionOK ? motionPeak.toFixed(1) : 'ยังไม่ได้รับสิทธิ์เซนเซอร์';
+    const w = (SENS[$('sSens').value] || SENS[3]).wake;
+    $('motionNeed').textContent = w === Infinity ? 'ไม่ปลุกด้วยเซนเซอร์' : w;
+  }
+  motionPeak = 0;
+}, 400);
+
+function startMotion() {
+  if (motionAsked) return;
+  motionAsked = true;
+  window.addEventListener('devicemotion', onMotion);
+}
+/* ใช้เซนเซอร์เฉพาะตอนตั้ง "พักหน้าจอ" + ปลุกด้วยการหยิบเครื่อง · ตั้งปลุกด้วยการแตะจอ = ไม่ขอสิทธิ์เลย */
+const needMotion = () => S.rest > 0 && S.sens > 0;
+async function askMotion() {             // iOS ต้องขออนุญาตจากการแตะจอของผู้ใช้
+  if (motionAsked || !needMotion() || typeof DeviceMotionEvent === 'undefined') return;
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    try { if (await DeviceMotionEvent.requestPermission() === 'granted') startMotion(); } catch (e) {}
+  } else startMotion();
+}
+['click', 'touchend'].forEach(ev => document.addEventListener(ev, askMotion, true));
+document.addEventListener('pointerdown', markActive, true);
+document.addEventListener('keydown', markActive, true);   // เครื่องสแกน Bluetooth
+
+function goRest() {
+  resting = true;
+  $('restMsg').innerHTML = S.sens === 0
+    ? '💤 พักหน้าจอ<br>แตะจอ เพื่อถ่ายต่อ'
+    : '💤 พักหน้าจอ<br>หยิบเครื่อง หรือแตะจอ เพื่อถ่ายต่อ';
+  $('restMsg').style.opacity = 1;
+  $('rest').style.display = 'flex';
+  setTimeout(() => { if (resting) $('restMsg').style.opacity = 0.12; }, 2500);
+  if (S.restCam) { stopStream(); video.srcObject = null; }   // ปิดกล้องจริง → ไอคอนกล้องของ iPhone หายไป
+}
+function wake() {
+  if (!resting) return;
+  resting = false;
+  markActive();
+  $('rest').style.display = 'none';
+  if (!track || track.readyState === 'ended') initCamera();
+  else if (video.paused) video.play().catch(() => initCamera());
+  keepAwake();
+}
+$('rest').addEventListener('pointerdown', e => { e.preventDefault(); wake(); });
+
+setInterval(() => {
+  if (!S.rest || resting || magOpen || mode !== 'pack' || settingsOpen || document.hidden || starting) return markActive();
+  if (shooting || Date.now() - live.at < 1500) return markActive();   // กำลังเล็งบาร์โค้ดอยู่ ไม่พัก
+  if (Date.now() - lastActive >= S.rest * 1000) goRest();
+}, 200);
+
+/* ===== แว่นขยาย (ส่องเบอร์ IC) ===== */
+let magOpen = false, magZ = 3, magTx = 0, magTy = 0, torchOn = false, frozen = false, magDrag = null;
+
+function trackCaps() { try { return track && track.getCapabilities ? track.getCapabilities() : {}; } catch (e) { return {}; } }
+
+async function openMag() {
+  magOpen = true;
+  $('mag').style.display = 'flex';
+  if (!track || track.readyState === 'ended') await initCamera();
+  if (!track) { alert('เปิดกล้องไม่ได้'); return closeMag(); }
+  // ขอภาพความละเอียดสูงสุดระหว่างส่อง (ซูมแล้วยังคมชัด)
+  try { await track.applyConstraints({ width: { ideal: 3840 }, height: { ideal: 2880 } }); } catch (e) {}
+  $('magVideo').srcObject = stream;
+  $('magVideo').play().catch(() => {});
+  $('magTorch').classList.toggle('na', !trackCaps().torch);
+  magTx = magTy = 0;
+  setFrozen(false);
+  applyMagZoom();
+}
+
+async function closeMag() {
+  magOpen = false;
+  $('mag').style.display = 'none';
+  if (torchOn) setTorch(false);
+  setFrozen(false);
+  $('magVideo').srcObject = null;
+  if (track) {                                    // กลับไปความละเอียดปกติ
+    const p = QP[S.quality];
+    try { await track.applyConstraints({ width: { ideal: p.stream }, height: { ideal: Math.round(p.stream * 0.75) } }); } catch (e) {}
+    tuneTrack();
+  }
+  markActive();
+}
+
+function applyMagZoom() {
+  magZ = +$('magZoom').value;
+  $('magZVal').textContent = magZ.toFixed(1) + 'x';
+  updateMagTransform();
+}
+function updateMagTransform() {
+  const v = $('magView');
+  const maxX = (magZ - 1) * v.clientWidth / 2, maxY = (magZ - 1) * v.clientHeight / 2;
+  magTx = Math.max(-maxX, Math.min(maxX, magTx));
+  magTy = Math.max(-maxY, Math.min(maxY, magTy));
+  const t = 'translate(' + magTx + 'px,' + magTy + 'px) scale(' + magZ + ')';
+  $('magVideo').style.transform = t;
+  $('magFreeze').style.transform = t;
+}
+
+async function setTorch(on) {
+  if (!track) return;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: on }] });
+    torchOn = on;
+  } catch (e) {
+    torchOn = false;
+    if (on) alert('สั่งเปิดไฟฉายไม่สำเร็จ');
+  }
+  $('magTorch').classList.toggle('on', torchOn);
+}
+
+function setFrozen(f) {
+  frozen = f;
+  const c = $('magFreeze'), v = $('magVideo');
+  if (f && v.videoWidth) {
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext('2d').drawImage(v, 0, 0);
+    c.style.display = 'block'; v.style.visibility = 'hidden';
+  } else {
+    frozen = false;
+    c.style.display = 'none'; v.style.visibility = 'visible';
+  }
+  $('magFreezeBtn').classList.toggle('on', frozen);
+  $('magFreezeBtn').textContent = frozen ? '▶ ภาพสด' : '⏸ หยุดภาพ';
+}
+
+$('magBtn').onclick = openMag;
+$('magClose').onclick = closeMag;
+$('magZoom').oninput = applyMagZoom;
+$('magFreezeBtn').onclick = () => setFrozen(!frozen);
+$('magTorch').onclick = () => {
+  if (!trackCaps().torch) {
+    alert('iPhone/เบราว์เซอร์รุ่นนี้ยังไม่ให้หน้าเว็บสั่งเปิดไฟฉาย\n\nทางเลือก: ใช้ไฟส่องจากโคมหรือมือถืออีกเครื่อง แล้วกด ⏸ หยุดภาพ เพื่ออ่านเบอร์');
+    return;
+  }
+  setTorch(!torchOn);
+};
+$('magView').addEventListener('pointerdown', e => {
+  magDrag = { x: e.clientX, y: e.clientY, tx: magTx, ty: magTy };
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+});
+$('magView').addEventListener('pointermove', e => {
+  if (!magDrag) return;
+  magTx = magDrag.tx + (e.clientX - magDrag.x);
+  magTy = magDrag.ty + (e.clientY - magDrag.y);
+  updateMagTransform();
+});
+['pointerup', 'pointercancel'].forEach(ev => $('magView').addEventListener(ev, () => { magDrag = null; }));
+
+/* ===== กันไม่ให้ iPhone ล็อกเครื่อง ===== */
+let wakeLock = null;
+async function keepAwake() {
+  if ((!S.wake && !S.rest) || !('wakeLock' in navigator) || document.hidden) return;
+  try {
+    if (!wakeLock || wakeLock.released) wakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) {}
+}
+async function releaseWake() {
+  try { if (wakeLock) await wakeLock.release(); } catch (e) {}
+  wakeLock = null;
+}
+
+let resumeTimer = null;
+function resume() {
+  if (document.hidden) return;
+  keepAwake();
+  markActive();
+  if (resting && S.restCam) return;           // พักอยู่และปิดกล้องไว้ → เปิดตอนหยิบเครื่อง
+  clearTimeout(resumeTimer);
+  resumeTimer = setTimeout(async () => {
+    // iOS จะ "พัก" กล้องชั่วคราวตอนออกจากหน้า แล้วคืนให้เองเมื่อกลับมา → รอก่อน ไม่เปิดใหม่ (เปิดใหม่ = ถามสิทธิ์อีก)
+    for (let i = 0; i < 15 && track && track.readyState === 'live' && track.muted; i++) await sleep(200);
+    const dead = !track || track.readyState === 'ended' || !video.srcObject;
+    if (dead) initCamera();
+    else if (video.paused) video.play().catch(() => initCamera());
+  }, 300);
+}
+document.addEventListener('visibilitychange', resume);
+window.addEventListener('pageshow', resume);
+window.addEventListener('focus', resume);
+document.addEventListener('pointerdown', keepAwake, true);         // iOS บางรุ่นต้องมีการแตะก่อน
+
+/* ===== อ่านบาร์โค้ด ===== */
+async function initDetector() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const f = await BarcodeDetector.getSupportedFormats();
+      if (f && f.length) { detector = new BarcodeDetector({ formats: f }); return; }
+    } catch (e) {}
+  }
+  if (window.ZXing) {
+    const F = ZXing.BarcodeFormat;
+    const fmts = [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX];
+    const mk = hard => {
+      const h = new Map();
+      h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, fmts);
+      if (hard) h.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      const r = new ZXing.MultiFormatReader(); r.setHints(h); return r;
+    };
+    zxFast = mk(false); zxHard = mk(true);
+  }
+}
+
+async function detectOn(canvas, hard) {
+  try {
+    if (detector) {
+      const r = await detector.detect(canvas);
+      return r.length ? r[0].rawValue : '';
+    }
+    if (zxFast) {
+      const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+      const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
+      return (hard ? zxHard : zxFast).decodeWithState(bmp).getText();
+    }
+  } catch (e) {}
+  return '';
+}
+
+/* สแกนแถบกลางภาพด้วยความละเอียดสูง (บาร์โค้ด 1D เส้นเล็กอ่านง่ายขึ้นมาก) สลับกับสแกนทั้งภาพ */
+let frameN = 0;
+async function scanLoop() {
+  try {
+    if (video.readyState >= 2 && !document.hidden && !settingsOpen && !resting && !magOpen && !camOff && track) {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      let code = '';
+      if (frameN++ % 3 !== 2) {
+        const cw = vw * 0.9, ch = vh * 0.42, cx = (vw - cw) / 2, cy = (vh - ch) / 2;
+        const s = Math.min(1, 1280 / cw);
+        scanCanvas.width = cw * s | 0; scanCanvas.height = ch * s | 0;
+        scanCtx.drawImage(video, cx, cy, cw, ch, 0, 0, scanCanvas.width, scanCanvas.height);
+        code = await detectOn(scanCanvas, true);
+      } else {
+        const s = Math.min(1, 960 / Math.max(vw, vh));
+        scanCanvas.width = vw * s | 0; scanCanvas.height = vh * s | 0;
+        scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+        code = await detectOn(scanCanvas, false);
+      }
+      if (code) onCode(code);
+    }
+  } catch (e) {}
+  setTimeout(scanLoop, detector ? 120 : 50);
+}
+
+function onCode(code) {
+  code = code.trim();
+  if (!code) return;
+  const now = Date.now();
+  // ติ๊ด 1 ครั้งต่อบาร์โค้ด (ถ้าหายจากกล้องเกิน 3 วิ แล้วกลับมา จะติ๊ดใหม่)
+  if (code !== live.code || now - live.at > 3000) beepScan();
+  live.hits = code === live.code ? live.hits + 1 : 1;
+  live.code = code; live.at = now;
+  if (!manual) bcInput.value = code;
+  if (mode === 'recv' && !manual && code !== lastLookup) recvLookup(code);   // รับคืน: ตรวจทันทีที่สแกนเจอ
+  if (!$('auto').checked || manual || live.hits < 2) return;
+  if (mode === 'pack' && code !== lastShot.code) shoot();
+  if (mode === 'find' && code !== lastFind) doSearch(code);
+}
+
+setInterval(() => {
+  const fresh = Date.now() - live.at < STALE_MS;
+  if (!manual && !fresh && bcInput.value && mode === 'pack') bcInput.value = '';
+  const v = bcInput.value.trim();
+  bcTag.textContent = v ? '✔ ' + v : (track ? 'กำลังค้นหาบาร์โค้ด…' : bcTag.textContent);
+  bcTag.classList.toggle('found', !!v);
+}, 250);
+
+bcInput.addEventListener('input', () => { manual = !!bcInput.value; });
+bcInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); mainAction(); } });
+$('clr').onclick = () => { bcInput.value = ''; manual = false; live = { code: '', at: 0, hits: 0 }; lastFind = ''; };
+
+function mainAction() {
+  if (mode === 'pack') shoot();
+  else if (mode === 'recv') receiveAndShoot();
+  else doSearch(bcInput.value.trim());
+}
+$('shot').onclick = mainAction;
+
+/* ===== ถ่ายรูป ===== */
+let shooting = false;
+async function shoot() {
+  if (shooting || video.readyState < 2) return;
+  shooting = true;
+  try {
+    const takenAt = new Date();
+    const p = QP[S.quality];
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const s = Math.min(1, p.maxW / Math.max(vw, vh));
+    shotCanvas.width = vw * s | 0; shotCanvas.height = vh * s | 0;
+    shotCtx.drawImage(video, 0, 0, shotCanvas.width, shotCanvas.height);
+    feedback('shot');
+    let code = bcInput.value.trim();
+    if (!code) code = await detectOn(shotCanvas, true);
+    finishShot(code, takenAt);
+  } finally { shooting = false; }
+}
+
+function finishShot(code, takenAt) {
+  code = code || 'NO-BARCODE';
+  const job = {
+    id: takenAt.getTime() + '-' + Math.random().toString(36).slice(2, 7),
+    code,
+    fileName: safe(code) + ' ' + thDate(takenAt) + ' ' + thTime(takenAt) + '.jpg',  // TH123 20 ม.ค.2569 17.30.49.jpg
+    takenAt: fmt(takenAt),
+    dateFolder: ymd(takenAt, '-'),
+    data: shotCanvas.toDataURL('image/jpeg', QP[S.quality].q).split(',')[1],
+    status: 'pending', tries: 0
+  };
+  showLatest(job, makePreview());
+  enqueue(job);
+  lastShot = { code, at: Date.now() };
+  bcInput.value = ''; manual = false;
+  live.hits = 0;
+}
+
+/* ถ่ายผ่านแอปกล้อง (สำรอง) */
+$('fileBtn').onclick = () => $('fileIn').click();
+$('fileIn').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const takenAt = new Date();
+  const img = await createImageBitmap(f);
+  const s = Math.min(1, QP[S.quality].maxW / Math.max(img.width, img.height));
+  shotCanvas.width = img.width * s | 0; shotCanvas.height = img.height * s | 0;
+  shotCtx.drawImage(img, 0, 0, shotCanvas.width, shotCanvas.height);
+  const code = bcInput.value.trim() || await detectOn(shotCanvas, true);
+  feedback(mode === 'pack' ? 'shot' : 'scan');
+  if (mode === 'pack') finishShot(code, takenAt);
+  else if (code && mode === 'recv') { bcInput.value = code; manual = true; recvLookup(code); }
+  else if (code) { bcInput.value = code; doSearch(code); }
+  else alert('อ่านบาร์โค้ดจากรูปไม่ได้ ลองถ่ายใกล้ขึ้น หรือพิมพ์เอง');
+};
+
+/* ===== หน้าตั้งค่า ===== */
+async function fillCameraList() {
+  const sel = $('sCamera');
+  const cams = (await listCams()).filter(c => !/front|หน้า/i.test(c.label));
+  sel.innerHTML = '<option value="auto">อัตโนมัติ (แนะนำ)</option>' +
+    cams.map((c, i) => '<option value="' + esc(c.deviceId) + '">' + esc(c.label || ('กล้อง ' + (i + 1))) + '</option>').join('');
+  sel.value = [...sel.options].some(o => o.value === S.camera) ? S.camera : 'auto';
+}
+
+function openSettings() {
+  settingsOpen = true;
+  fillTampermonkey();
+  const qs = $('sQuality');
+  qs.innerHTML = Object.entries(QP).map(([k, v]) => '<option value="' + k + '">' + v.label + '</option>').join('');
+  qs.value = S.quality;
+  fillCameraList();
+  $('sWake').checked = S.wake;
+  $('sRest').value = String(S.rest);
+  $('sRestCam').value = S.restCam ? '1' : '0';
+  $('sSens').value = String(S.sens);
+  $('sCamSize').value = S.camSize;
+  $('sBeep').checked = S.beep;
+  $('sStaff').value = S.staff || '';
+  $('sShutter').checked = S.shutter;
+  $('connBox').style.display = IN_GAS ? 'none' : '';
+  $('sTest').style.display = '';
+  $('sUrl').value = API_URL;
+  $('sToken').value = API_TOKEN;
+  showCamInfo();
+  $('setBg').style.display = 'flex';
+}
+function closeSettings() { settingsOpen = false; $('setBg').style.display = 'none'; }
+
+function applySettings() {
+  const camChanged = $('sCamera').value !== S.camera;
+  const qChanged = $('sQuality').value !== S.quality;
+  S.quality = $('sQuality').value;
+  S.camera = $('sCamera').value;
+  S.wake = $('sWake').checked;
+  S.rest = +$('sRest').value;
+  S.restCam = $('sRestCam').value === '1';
+  S.sens = +$('sSens').value;
+  S.camSize = $('sCamSize').value;
+  S.beep = $('sBeep').checked;
+  S.staff = $('sStaff').value.trim();
+  S.shutter = $('sShutter').checked;
+  saveS();
+  applyCamSize();
+  markActive();
+  if (!IN_GAS) {
+    API_URL = normalizeApiUrl($('sUrl').value);
+    $('sUrl').value = API_URL;               // แสดงลิงก์ที่ระบบแก้ให้แล้ว
+    API_TOKEN = $('sToken').value.trim();
+    try { localStorage.setItem('pc_url', API_URL); localStorage.setItem('pc_token', API_TOKEN); } catch (e) {}
+  }
+  if (S.wake || S.rest) keepAwake(); else releaseWake();
+  if (camChanged) { S.lastCamId = ''; saveS(); initCamera(); }
+  else if (qChanged && track) {               // เปลี่ยนความชัด: ปรับกล้องตัวเดิม ไม่ต้องเปิดใหม่
+    const p = QP[S.quality];
+    track.applyConstraints({ width: { ideal: p.stream }, height: { ideal: Math.round(p.stream * 0.75) } })
+      .then(showCamInfo).catch(() => {});
+  }
+  jobs.forEach(j => { if (j.status === 'pending') j.nextAt = 0; });   // ตั้งค่าใหม่แล้ว ส่งที่ค้างทันที
+  pump();
+}
+
+$('cfg').onclick = openSettings;
+$('sSave').onclick = () => { applySettings(); closeSettings(); };
+$('sTest').onclick = () => { applySettings(); testConnection(); };
+$('setBg').onclick = e => { if (e.target === $('setBg')) closeSettings(); };
+
+/* ===== 📥 รับของตีกลับ (Lazada) ===== */
+let lastLookup = '', lookupSeq = 0, receiving = false;
+
+function renderRecvCard(r, headline) {
+  const ms = r.matches || [];
+  let h = '<div class="big">📦 ' + esc(r.key || '') + '</div>';
+  if (headline) h += '<div>' + headline + '</div>';
+  else if (r.received) h += '<div class="warn">⚠️ กล่องนี้รับไปแล้วเมื่อ ' + esc(r.received.date) + (r.received.by ? ' โดย ' + esc(r.received.by) : '') + '</div>';
+  else if (ms.length) h += '<div class="ok">✅ พบในรายการตีกลับ ' + ms.length + ' รายการ – กด "ยืนยันรับของ"</div>';
+  else h += '<div class="bad">❓ ไม่พบเลขพัสดุนี้ในรายการตีกลับ/คำขอคืน</div>';
+  // รวมแถวของออเดอร์เดียวกัน + รวมสินค้าชนิดเดียวกันเป็น ×จำนวน
+  const groups = [];
+  ms.forEach(m => {
+    const k = [m.src, m.order, m.kind, m.status].join('|');
+    let g = groups.find(x => x.k === k);
+    if (!g) groups.push(g = { k, m, items: [], amount: 0, reasons: [] });
+    const label = String(m.name || m.sku || '-').replace(/\s+/g, ' ').trim();
+    const q = Math.max(1, parseInt(m.qty, 10) || 1);
+    const f = g.items.find(x => x.label === label);
+    if (f) f.qty += q; else g.items.push({ label, qty: q });
+    g.amount += parseFloat(String(m.amount).replace(/,/g, '')) || 0;
+    if (m.reason && g.reasons.indexOf(m.reason) < 0) g.reasons.push(m.reason);
+  });
+  groups.forEach(g => {
+    const m = g.m;
+    h += '<div class="rItem ' + pfClass(m.src) + '"><b>' + platHtml(m.src) + ' • ' + esc(m.kind || '-') + '</b>' +
+      '<br>ออเดอร์ ' + esc(m.order) +
+      itemsHtml(g.items) +
+      (g.amount ? '<br>💰 ' + g.amount.toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' บาท' : '') +
+      (g.reasons.length ? '<br>เหตุผล: ' + esc(g.reasons.join(' / ')) : '') +
+      (m.deadline ? '<br>⏰ ยื่นข้อพิพาทได้ถึง ' + esc(m.deadline) : '') +
+      '<br>สถานะรับของ: ' + esc(m.status || '-') + (m.rdate ? ' (' + esc(m.rdate) + ')' : '') + '</div>';
+  });
+  $('recvCard').innerHTML = h;
+}
+
+/* ชื่อแพลตฟอร์มแบบมีสี: Lazada = ตัวฟ้า, Shopee = แถบส้ม */
+function platHtml(src) {
+  src = String(src || '');
+  if (/^Lazada/.test(src)) return '<span class="lzTxt">Lazada</span>' + esc(src.slice(6));
+  if (/^Shopee/.test(src)) return '<span class="spBar">Shopee</span>' + esc(src.slice(6));
+  return esc(src);
+}
+function pfClass(src) { return /^Lazada/.test(src) ? 'pf-lz' : /^Shopee/.test(src) ? 'pf-sp' : ''; }
+
+/* ===== อัปโหลดไฟล์ Shopee ไปยังโฟลเดอร์ของร้าน ===== */
+let spShop = '', spTimer = null;
+// กลับมาที่แอปหลังส่งไฟล์ → อัปเดตจำนวน "รอนำเข้า"
+document.addEventListener('visibilitychange', () => { if (!document.hidden && mode === 'recv' && shopsLoaded) loadShops(); });
+function loadShops() {
+  $('spMsg').textContent = '⏳ กำลังโหลดรายชื่อร้าน…';
+  callApi('shopeeShops', {}).then(r => {
+    const box = $('spShops');
+    box.innerHTML = '';
+    let busy = false;
+    (r.shops || []).forEach(s => {
+      const wrap = document.createElement('div');
+      wrap.className = 'spShop';
+      const ago = t => { const m = Math.round((s.now - t) / 60000); return m < 1 ? 'เมื่อสักครู่' : m < 60 ? m + ' นาทีก่อน' : Math.round(m / 60) + ' ชม.ก่อน'; };
+      const job = s.job || {}, tab = s.tab;
+      const tabOn = tab && (s.now - tab.at) < 3 * 60000;          // แท็บ Mac เช็กเข้ามาภายใน 3 นาที
+      let line = '';
+      if (job.state === 'requested') { line = '⏳ ส่งคำขอแล้ว รอแท็บ Mac รับงาน…'; busy = true; }
+      else if (job.state === 'running' && s.now - job.at < 10 * 60000) { line = '🔄 กำลังดึงไฟล์จาก Seller Centre…'; busy = true; }
+      else if (job.state === 'done') line = '✅ ' + job.msg;
+      else if (job.state === 'error') line = '❌ ' + job.msg;
+      else if (s.waiting) line = 'รอนำเข้า ' + s.waiting + ' ไฟล์';
+      else line = 'ดึงจาก Seller Centre อัตโนมัติ';
+      if (s.waiting && job.state === 'done') { line += ' • รอนำเข้า ' + s.waiting + ' ไฟล์'; busy = true; }
+
+      const b = document.createElement('button');
+      b.innerHTML = '⚡ ' + esc(s.name) + '<small>' + esc(line) + '</small>';
+      b.onclick = () => {
+        b.disabled = true;
+        callApi('shopeeRequest', { shop: s.name }).then(() => {
+          beepScan();
+          if (!tabOn) alert('ส่งคำขอแล้ว แต่ตอนนี้ไม่เห็นแท็บ Seller Centre ของร้าน ' + s.name + ' บน Mac\n\nเปิด Chrome โปรไฟล์ของร้านนี้ที่หน้า "ขอยกเลิก/คืนเงิน/คืนสินค้า" ทิ้งไว้ แล้วระบบจะทำต่อเอง');
+          loadShops();
+        }).catch(e => { alert('ส่งคำขอไม่สำเร็จ: ' + e.message); b.disabled = false; });
+      };
+      if (job.state === 'requested' || (job.state === 'running' && s.now - job.at < 10 * 60000)) b.disabled = true;
+
+      const info = document.createElement('div');
+      info.className = 'spTab';
+      info.textContent = tabOn ? '🟢 แท็บ Mac พร้อม' : (tab ? '⚪ แท็บ Mac ไม่ได้เปิด (เห็นล่าสุด ' + ago(tab.at) + ')' : '⚪ ยังไม่เคยเชื่อมแท็บ Mac');
+      const m = document.createElement('a');
+      m.href = '#'; m.className = 'spManual'; m.textContent = '📁 เลือกไฟล์เอง';
+      m.onclick = e => { e.preventDefault(); spShop = s.name; $('spFile').click(); };
+      wrap.append(b, info, m);
+      box.appendChild(wrap);
+    });
+    $('spMsg').textContent = (r.shops || []).length
+      ? 'กด ⚡ ร้าน → แท็บ Seller Centre ของร้านนั้นบน Mac จะส่งออกและส่งเข้าระบบเอง (กดจาก iPhone ก็ได้) • นำเข้าภายใน ~10 นาที'
+      : 'ยังไม่มีโฟลเดอร์ร้าน – รัน importShopeeFiles ในโปรเจกต์ LAZADA X SHOPEE DATA 1 ครั้ง';
+    clearTimeout(spTimer);
+    if (busy && mode === 'recv' && !document.hidden) spTimer = setTimeout(loadShops, 10000);   // อัปเดตสถานะทุก 10 วิ ระหว่างรอ
+  }).catch(e => {
+    $('spShops').innerHTML = '<button id="spLoad" style="flex:1 1 100%">↻ ลองใหม่</button>';
+    $('spLoad').onclick = loadShops;
+    $('spMsg').textContent = '❌ ' + e.message;
+  });
+}
+$('spLoad').onclick = loadShops;
+
+function fileToBase64(f) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(',')[1]);
+    fr.onerror = () => rej(new Error('อ่านไฟล์ไม่ได้'));
+    fr.readAsDataURL(f);
+  });
+}
+$('spFile').onchange = async e => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length || !spShop) return;
+  const shop = spShop;
+  let ok = 0, imp = null;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    $('spMsg').textContent = '⏳ [' + shop + '] กำลังอัปโหลด ' + f.name + (i === files.length - 1 ? ' และนำเข้า…' : ' …');
+    try {
+      if (f.size > 40 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 40 MB');
+      const data = await fileToBase64(f);
+      const r = await callApi('shopeeUpload', { shop, name: f.name, data, importNow: i === files.length - 1 });
+      if (r.imported) imp = r.imported;
+      ok++;
+    } catch (err) {
+      alert('อัปโหลด ' + f.name + ' ไม่สำเร็จ\n' + err.message);
+    }
+  }
+  if (ok) {
+    beepScan();
+    $('spMsg').textContent = '✅ [' + shop + '] อัปโหลดแล้ว ' + ok + ' ไฟล์ • ' +
+      (!imp || imp.skipped ? 'ระบบจะนำเข้าภายใน ~10 นาที'
+        : imp.error ? 'นำเข้าไม่สำเร็จ: ' + imp.error
+        : 'นำเข้าแล้ว (ใหม่ ' + (imp.fresh || 0) + ' รายการ) – กด 📋 ดูได้เลย');
+    loadShops();
+  }
+};
+
+/* รายการสินค้า: ทีละบรรทัด ชนิดเดียวกันแสดง ×จำนวน */
+function itemsHtml(items) {
+  return '<ul class="itemList">' + (items || []).map(x => {
+    const it = typeof x === 'string' ? { label: x, qty: 1 } : x;
+    return '<li>' + esc(it.label) + (it.qty > 1 ? ' <span class="qty">×' + it.qty + '</span>' : '') + '</li>';
+  }).join('') + '</ul>';
+}
+
+function recvLookup(code) {
+  code = (code || '').trim();
+  if (code.length < 6) return;
+  lastLookup = code;
+  const seq = ++lookupSeq;
+  $('recvCard').innerHTML = '<div class="big">📦 ' + esc(code) + '</div>⏳ กำลังตรวจสอบ…';
+  callApi('rlookup', { q: code }).then(r => { if (seq === lookupSeq) renderRecvCard(r); })
+    .catch(e => {
+      if (seq === lookupSeq) $('recvCard').innerHTML = '<div class="big">📦 ' + esc(code) + '</div><div class="bad">❌ ตรวจสอบไม่สำเร็จ: ' + esc(e.message) + '</div>';
+    });
+}
+
+/* กดยืนยัน: ถ่ายรูปสภาพของ → บันทึกรับ → ส่งรูปเบื้องหลัง */
+async function receiveAndShoot() {
+  if (receiving) return;
+  const code = bcInput.value.trim() || (Date.now() - live.at < STALE_MS ? live.code : '');
+  if (!code) { alert('สแกนหรือพิมพ์เลขพัสดุก่อน'); return; }
+  if (camOff) { setCamOff(false); await sleep(900); }          // ยิงเครื่องสแกนตอนปิดกล้อง → เปิดกล้องก่อนถ่ายรูป
+  if (video.readyState < 2) { alert('กล้องยังไม่พร้อม'); return; }
+  receiving = true;
+  try {
+    const takenAt = new Date();
+    const p = QP[S.quality];
+    const vw = video.videoWidth, vh = video.videoHeight, s = Math.min(1, p.maxW / Math.max(vw, vh));
+    shotCanvas.width = vw * s | 0; shotCanvas.height = vh * s | 0;
+    shotCtx.drawImage(video, 0, 0, shotCanvas.width, shotCanvas.height);
+    feedback('shot');
+    const preview = makePreview();
+    const data = shotCanvas.toDataURL('image/jpeg', p.q).split(',')[1];
+
+    $('recvCard').innerHTML = '<div class="big">📦 ' + esc(code) + '</div>⏳ กำลังบันทึกรับของ…';
+    const base = { q: code, by: S.staff || '' };
+    let r = await callApi('receive', base);
+    if (r.need === 'already') {
+      renderRecvCard(r);
+      if (!confirm('กล่องนี้รับไปแล้วเมื่อ ' + r.received.date + '\nบันทึกรับซ้ำอีกครั้ง?')) return;
+      r = await callApi('receive', Object.assign({ force: true }, base));
+    } else if (r.need === 'nomatch') {
+      renderRecvCard(r);
+      if (!confirm('ไม่พบเลขพัสดุนี้ในรายการตีกลับ\n\nบันทึกรับไว้ก่อนไหม?\n(ระบบจะจับคู่ให้เองเมื่อดึงข้อมูล Lazada รอบถัดไป)')) return;
+      r = await callApi('receive', Object.assign({ force: true }, base));
+    }
+    renderRecvCard(r, '<span class="ok">✅ บันทึกรับของแล้ว ' + esc(r.recorded || '') + '</span>');
+    if (listMode === 'done') setTimeout(loadDone, 8000);          // รอรูปอัปโหลดแล้วรีเฟรชรายการรับคืน
+    else if (listMode === 'pending') loadPending();
+
+    const job = {
+      id: takenAt.getTime() + '-' + Math.random().toString(36).slice(2, 7),
+      kind: 'return', tracking: r.key, code,
+      fileName: 'คืน ' + safe(code) + ' ' + thDate(takenAt) + ' ' + thTime(takenAt) + '.jpg',
+      takenAt: fmt(takenAt), dateFolder: ymd(takenAt, '-'), data,
+      status: 'pending', tries: 0
+    };
+    showLatest(job, preview);
+    enqueue(job);
+    lastShot = { code, at: Date.now() };
+    bcInput.value = ''; manual = false; live.hits = 0;
+  } catch (e) {
+    $('recvCard').insertAdjacentHTML('beforeend', '<div class="bad">❌ บันทึกไม่สำเร็จ: ' + esc(e.message) + '</div>');
+  } finally {
+    receiving = false;
+  }
+}
+
+let pendingData = null, doneData = null, pendingFilter = '', listMode = '';
+document.querySelectorAll('#recvFilter button').forEach(b => {
+  b.onclick = () => {
+    pendingFilter = b.dataset.f;
+    document.querySelectorAll('#recvFilter button').forEach(x => x.classList.toggle('on', x === b));
+    listMode === 'done' ? renderDone() : renderPending();
+  };
+});
+function setListMode(m) {
+  listMode = m;
+  $('recvPendBtn').classList.toggle('on', m === 'pending');
+  $('recvDoneBtn').classList.toggle('on', m === 'done');
+}
+
+function loadPending() {
+  setListMode('pending');
+  $('recvMsg').textContent = '⏳ กำลังโหลด…';
+  $('recvList').innerHTML = '';
+  callApi('rpending', {}).then(r => {
+    pendingData = r;
+    $('recvFilter').style.display = 'flex';
+    if (listMode === 'pending') renderPending();
+  }).catch(e => { $('recvMsg').textContent = '❌ โหลดไม่สำเร็จ: ' + e.message; });
+}
+
+function loadDone() {
+  setListMode('done');
+  $('recvMsg').textContent = '⏳ กำลังโหลด…';
+  $('recvList').innerHTML = '';
+  callApi('rdone', { days: 30 }).then(r => {
+    doneData = r;
+    $('recvFilter').style.display = 'flex';
+    if (listMode === 'done') renderDone();
+  }).catch(e => { $('recvMsg').textContent = '❌ โหลดไม่สำเร็จ: ' + e.message; });
+}
+
+function filterCounts(all) {
+  const cnt = p => all.filter(it => String(it.src).indexOf(p) === 0).length;
+  document.querySelectorAll('#recvFilter button').forEach(b => {
+    const f = b.dataset.f;
+    b.textContent = (f || 'ทั้งหมด') + ' (' + (f ? cnt(f) : all.length) + ')';
+  });
+  return pendingFilter ? all.filter(it => String(it.src).indexOf(pendingFilter) === 0) : all;
+}
+
+/* รายการที่รับคืนแล้ว (ล่าสุดอยู่บน) */
+function renderDone() {
+  const r = doneData; if (!r) return;
+  const items = filterCounts(r.items || []);
+  $('recvList').innerHTML = '';
+  const unmatched = items.filter(it => !it.matched).length;
+  $('recvMsg').textContent = items.length
+    ? 'รับคืนแล้ว ' + items.length + ' รายการ ใน ' + r.days + ' วันล่าสุด (ล่าสุดอยู่บน)' + (unmatched ? ' • รอจับคู่ ' + unmatched : '')
+    : 'ยังไม่มีรายการรับคืนใน ' + r.days + ' วันล่าสุด';
+  items.forEach(it => {
+    const li = document.createElement('li');
+    li.className = pfClass(it.src);
+    li.innerHTML =
+      '<span class="okBadge">✅ รับแล้ว ' + esc(thFromIso(String(it.date) + (String(it.date).length === 16 ? ':00' : ''))) + '</span>' +
+      (it.by ? ' • โดย ' + esc(it.by) : '') +
+      '<br>' + (it.matched ? platHtml(it.src) + (it.kind ? ' • ' + esc(it.kind) : '') : '<span class="wait">❓ ยังไม่พบในรายการตีกลับ (ระบบจะจับคู่ให้เมื่อข้อมูลเข้า)</span>') +
+      '<br><span class="trk">📦 ' + esc(it.track) + '</span>' +
+      (it.order ? '<br>ออเดอร์ ' + esc(it.order) : '') +
+      (it.amount ? ' • 💰 ' + Number(it.amount).toLocaleString('th-TH') + ' บาท' : '') +
+      (it.items && it.items.length ? itemsHtml(it.items) : '') +
+      (it.photos && it.photos.length ? '<div><span class="photoBtn">🖼 ดูรูปสภาพของ' + (it.photos.length > 1 ? ' (' + it.photos.length + ')' : '') + '</span></div>' : '');
+    const pb = li.querySelector('.photoBtn');
+    if (pb) pb.onclick = () => openReturnPhoto(it, 0);
+    $('recvList').appendChild(li);
+  });
+}
+
+/* ดูรูปสภาพของที่รับคืน (ในหน้าแอป) */
+const rImgCache = new Map();
+function openReturnPhoto(it, i) {
+  const id = it.photos[i];
+  viewing = null;
+  $('viewer').style.display = 'flex';
+  $('vDel').style.display = 'none';
+  $('vTitle').textContent = '📦 ' + it.track + (it.photos.length > 1 ? '  •  รูป ' + (i + 1) + '/' + it.photos.length + ' (แตะรูปเพื่อดูรูปถัดไป)' : '');
+  $('vImg').removeAttribute('src'); $('vImg').style.display = 'none';
+  $('vImg').onclick = it.photos.length > 1 ? () => openReturnPhoto(it, (i + 1) % it.photos.length) : null;
+  if (rImgCache.has(id)) return showViewerImg(rImgCache.get(id));
+  $('vMsg').textContent = '⏳ กำลังโหลดรูป…';
+  callApi('rimage', { id }).then(r => {
+    const src = 'data:' + r.mime + ';base64,' + r.data;
+    rImgCache.set(id, src);
+    showViewerImg(src);
+  }).catch(e => { $('vMsg').textContent = '❌ โหลดรูปไม่ได้: ' + e.message; });
+}
+
+function renderPending() {
+  setListMode('pending');
+  const r = pendingData; if (!r) return;
+  const items = filterCounts(r.items || []);
+  $('recvList').innerHTML = '';
+  $('recvMsg').textContent = (items.length
+      ? 'ยังไม่ได้รับของ ' + items.length + ' รายการ (รอนานสุดอยู่บน)'
+      : '🎉 ไม่มีรายการค้างรับ') +
+    (r.hiddenOld ? ' • ซ่อนรายการเก่ากว่า ' + r.maxDays + ' วัน ' + r.hiddenOld + ' รายการ' : '');
+  {
+    const now = Date.now();
+    items.forEach(it => {
+      const d = Date.parse(String(it.date).slice(0, 10));
+      const days = isNaN(d) ? '' : Math.max(0, Math.floor((now - d) / 864e5));
+      const li = document.createElement('li');
+      li.className = pfClass(it.src);
+      li.innerHTML =
+        (days !== '' ? '<span class="days">รอ ' + days + ' วัน</span> • ' : '') + platHtml(it.src) + ' • ' + esc(it.kind) +
+        '<br><span class="trk">' + (it.track ? '📦 ' + esc(it.track) : '📦 (ยังไม่มีเลขพัสดุ)') + '</span>' +
+        '<br>ออเดอร์ ' + esc(it.order) + ' • ' + esc(it.status) +
+        (it.deadline ? '<br><span class="days">⏰ ยื่นข้อพิพาทได้ถึง ' + esc(it.deadline) + '</span>' : '') +
+        itemsHtml(it.items);
+      $('recvList').appendChild(li);
+    });
+  }
+}
+$('recvPendBtn').onclick = loadPending;
+$('recvDoneBtn').onclick = loadDone;
+
+/* ===== ค้นหา / ลบ ===== */
+let searchSeq = 0;
+/* q ว่าง = แสดงรายการล่าสุด 50 รายการ */
+function doSearch(q, silent) {
+  q = (q || '').trim();
+  if (q && q.length < 3) { $('findMsg').textContent = 'สแกนหรือพิมพ์บาร์โค้ดอย่างน้อย 3 ตัวอักษร'; return; }
+  lastFind = q;
+  const seq = ++searchSeq;
+  $('findMsg').textContent = q ? 'กำลังค้นหา "' + q + '" …' : 'กำลังโหลดรายการล่าสุด…';
+  $('results').innerHTML = '';
+  callApi('search', { q }).then(r => {
+    if (seq !== searchSeq) return;
+    const items = r.items || [];
+    $('findMsg').textContent = !items.length
+      ? (q ? '❌ ไม่พบประวัติการแพคของ "' + q + '"' : 'ยังไม่มีรายการ')
+      : (q ? 'พบ ' + items.length + ' รายการ ของ "' + q + '"' : '🕘 รายการล่าสุด ' + items.length + ' รายการ') + ' • แตะเพื่อดูรูป';
+    items.forEach(renderResult);
+  }).catch(e => {
+    if (seq === searchSeq) $('findMsg').textContent = '❌ ค้นหาไม่สำเร็จ: ' + e.message;
+  });
+}
+
+function renderResult(it) {
+  const li = document.createElement('li');
+  li.innerHTML = '<div class="bc"></div><div class="meta"></div>';
+  it.li = li;
+  li.querySelector('.bc').textContent = it.barcode;
+  paintResult(it);
+  li.onclick = () => openViewer(it);
+  $('results').appendChild(li);
+}
+function paintResult(it) {
+  const meta = it.li.querySelector('.meta');
+  meta.textContent = '📅 ' + thFromIso(it.takenAt) + (it.status ? '   🗑 ' + it.status : '   🖼 แตะเพื่อดูรูป');
+  meta.style.color = it.status ? 'var(--err)' : '';
+}
+
+/* ===== ดูรูป / ลบถาวร ===== */
+const imgCache = new Map();
+let viewing = null;
+
+function openViewer(it) {
+  viewing = it;
+  $('viewer').style.display = 'flex';
+  $('vTitle').textContent = it.barcode + '  •  ' + thFromIso(it.takenAt);
+  $('vImg').removeAttribute('src');
+  $('vImg').style.display = 'none';
+  $('vDel').style.display = it.status ? 'none' : '';
+  $('vImg').onclick = null;
+  if (it.status) { $('vMsg').textContent = '🗑 ' + it.status; return; }
+  if (imgCache.has(it.row)) return showViewerImg(imgCache.get(it.row));
+  $('vMsg').textContent = '⏳ กำลังโหลดรูป…';
+  callApi('image', { row: it.row }).then(r => {
+    const src = 'data:' + r.mime + ';base64,' + r.data;
+    imgCache.set(it.row, src);
+    if (viewing === it) showViewerImg(src);
+  }).catch(e => { if (viewing === it) $('vMsg').textContent = '❌ โหลดรูปไม่ได้: ' + e.message; });
+}
+function showViewerImg(src) {
+  $('vMsg').textContent = '';
+  $('vImg').src = src;
+  $('vImg').style.display = 'block';
+}
+function closeViewer() { viewing = null; $('viewer').style.display = 'none'; }
+$('vClose').onclick = closeViewer;
+
+$('vDel').onclick = () => {
+  const it = viewing;
+  if (!it) return;
+  if (!confirm('ลบรูปของ ' + it.barcode + ' แบบถาวร?\n(' + thFromIso(it.takenAt) + ')\n\n⚠️ ลบแล้วกู้คืนไม่ได้')) return;
+  let pin = deletePin;
+  if (!pin) { pin = prompt('ใส่ PIN สำหรับลบ'); if (pin === null) return; }
+  const btn = $('vDel');
+  btn.disabled = true; btn.textContent = 'กำลังลบ…';
+  callApi('delete', { row: it.row, barcode: it.barcode, pin: pin.trim() }).then(r => {
+    deletePin = pin.trim();                  // จำ PIN ไว้จนกว่าจะปิดหน้าเว็บ
+    it.status = r.status || 'ลบถาวรแล้ว';
+    imgCache.delete(it.row);
+    paintResult(it);
+    closeViewer();
+  }).catch(e => {
+    if (/PIN/.test(e.message)) deletePin = '';
+    alert('ลบไม่สำเร็จ: ' + e.message);
+  }).finally(() => { btn.disabled = false; btn.textContent = '🗑 ลบถาวร'; });
+};
+
+/* ===== คิวอัปโหลดเบื้องหลัง ===== */
+const jobs = [];
+let active = 0, doneCount = 0;
+
+function enqueue(job) {
+  jobs.unshift(job);
+  idbPut(job);
+  pump();
+}
+
+function pump() {
+  while (active < CONCURRENCY) {
+    const now = Date.now();
+    const job = jobs.slice().reverse().find(j => j.status === 'pending' && !j.busy && (!j.nextAt || j.nextAt <= now));
+    if (!job) break;
+    job.busy = true; active++;
+    updateItem(job);
+    upload(job);
+  }
+  updateStats();
+}
+
+function upload(job) {
+  callApi('upload', {
+    clientId: job.id, barcode: job.code, fileName: job.fileName,
+    takenAt: job.takenAt, dateFolder: job.dateFolder, data: job.data,
+    kind: job.kind || '', tracking: job.tracking || ''
+  }).then(r => {
+    active--; job.busy = false; job.status = 'done'; job.url = r.url; job.data = null; job.err = '';
+    doneCount++; idbDel(job.id); updateItem(job); pump();
+  }).catch(err => {
+    active--; job.busy = false; job.tries++;
+    job.err = (err && err.message) || String(err);
+    job.nextAt = Date.now() + Math.min(30000, 1000 * Math.pow(2, job.tries));   // ลองใหม่เรื่อย ๆ จนกว่าจะสำเร็จ
+    updateItem(job); pump();
+  });
+}
+setInterval(pump, 1000);
+
+window.addEventListener('beforeunload', e => {
+  if (jobs.some(j => j.status === 'pending')) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ===== ติดต่อเซิร์ฟเวอร์ ===== */
+const GAS_FN = { upload: 'uploadPhoto', search: 'searchRecords', delete: 'deleteRecord', ping: 'pingServer', image: 'getImage',
+                 rlookup: 'returnLookup', receive: 'returnReceive', rpending: 'returnPending',
+                 shopeeShops: 'shopeeShops', shopeeUpload: 'shopeeUpload', shopeeRequest: 'shopeeRequest',
+                 rdone: 'returnReceived', rimage: 'returnImage' };
+
+function callApi(action, payload) {
+  if (IN_GAS) {
+    return new Promise((res, rej) =>
+      google.script.run.withSuccessHandler(res).withFailureHandler(rej)[GAS_FN[action]](payload));
+  }
+  return postApi(Object.assign({ action }, payload));
+}
+
+function postApi(payload) {
+  if (!API_URL) return Promise.reject(new Error('ยังไม่ได้ตั้งค่าลิงก์ – กดปุ่ม ⚙️'));
+  if (!/^https:\/\/script\.google\.com\/(?:a\/macros\/[^/]+|macros)\/s\/[A-Za-z0-9_-]+\/exec$/.test(API_URL)) {
+    const hint = /googleusercontent/.test(API_URL)
+      ? 'นี่เป็นลิงก์หลังเปิดในเบราว์เซอร์แล้ว ให้คัดลอกจาก Apps Script → Deploy → Manage deployments แทน'
+      : 'ต้องเป็น https://script.google.com/macros/s/…/exec';
+    return Promise.reject(new Error('ลิงก์ไม่ถูกต้อง (' + (API_URL.slice(0, 60) || 'ว่าง') + '…) – ' + hint + ' • แก้ได้ที่ ⚙️'));
+  }
+  let status = 0;
+  return fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ token: API_TOKEN }, payload))
+  }).catch(() => {
+    throw new Error('เชื่อมต่อไม่ได้ – ตรวจว่า Deploy ตั้ง Who has access = Anyone และกด New version แล้ว');
+  }).then(r => { status = r.status; return r.text(); })
+    .then(t => {
+      let j;
+      try { j = JSON.parse(t); } catch (e) {
+        const msg = t.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, ' ')
+                     .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150);
+        throw new Error('Apps Script ตอบผิดรูปแบบ (HTTP ' + status + '): ' + msg);
+      }
+      if (!j.ok) throw new Error(j.error || 'ทำรายการไม่สำเร็จ');
+      return j;
+    });
+}
+
+function testConnection() {
+  callApi('ping', {})
+    .then(j => alert('✅ เชื่อมต่อสำเร็จ\n' + (j.info || '')))
+    .catch(e => alert('❌ เชื่อมต่อไม่สำเร็จ\n\n' + e.message));
+}
+
+/* ===== เก็บคิวลงเครื่อง (รีเฟรชหน้าแล้วรูปไม่หาย) ===== */
+let db = null;
+function idbOpen() {
+  return new Promise(res => {
+    try {
+      const r = indexedDB.open('packcam', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('jobs', { keyPath: 'id' });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => res(null);
+    } catch (e) { res(null); }
+  });
+}
+function idbPut(job) {
+  if (!db) return;
+  try { const { busy, ...rec } = job; db.transaction('jobs', 'readwrite').objectStore('jobs').put(rec); } catch (e) {}
+}
+function idbDel(id) { if (db) try { db.transaction('jobs', 'readwrite').objectStore('jobs').delete(id); } catch (e) {} }
+function idbAll() {
+  return new Promise(res => {
+    if (!db) return res([]);
+    try {
+      const r = db.transaction('jobs').objectStore('jobs').getAll();
+      r.onsuccess = () => res(r.result || []); r.onerror = () => res([]);
+    } catch (e) { res([]); }
+  });
+}
+
+/* ===== UI รายการอัปโหลด ===== */
+let latestJob = null;
+function showLatest(job, previewSrc) {
+  latestJob = job;
+  $('lastImg').src = previewSrc;
+  $('pipImg').src = previewSrc;
+  $('pipCode').textContent = job.code;
+  const pip = $('pip');
+  pip.style.display = 'block';
+  pip.classList.remove('pop'); void pip.offsetWidth; pip.classList.add('pop');   // เด้งให้รู้ว่าถ่ายติดแล้ว
+  $('lastName').textContent = job.fileName;
+  $('lastBox').style.display = 'block';
+  updateItem(job);
+}
+function updateItem(job) {
+  if (job === latestJob) {
+    const st = $('lastSt');
+    st.className = job.status === 'done' ? 'done' : (job.tries ? 'retry' : 'pending');
+    st.textContent = job.status === 'done' ? '✔ ส่งเข้า Drive แล้ว'
+      : job.busy ? '⏳ กำลังส่ง…' : (job.tries ? '↻ ส่งไม่ผ่าน กำลังลองใหม่อัตโนมัติ' : '⏳ รอส่ง');
+    const ps = $('pipSt');
+    ps.className = st.className;
+    ps.textContent = job.status === 'done' ? '✔ ส่งแล้ว' : (job.tries ? '↻ ลองใหม่' : '⏳ กำลังส่ง');
+  }
+  updateStats();
+}
+function updateStats() {
+  const failing = jobs.filter(j => j.status === 'pending' && j.tries > 0);
+  $('sPend').textContent = jobs.filter(j => j.status === 'pending').length;
+  $('sDone').textContent = doneCount;
+  $('sErr').textContent = failing.length;
+  const w = $('warn');
+  if (failing.length) {
+    w.style.display = 'block';
+    w.textContent = '⚠️ มี ' + failing.length + ' รูปส่งไม่ผ่าน ระบบกำลังลองส่งใหม่เอง (รูปไม่หาย) • สาเหตุ: ' + (failing[0].err || '-');
+  } else w.style.display = 'none';
+}
+
+/* ===== เสียง/สั่น/แฟลช ===== */
+let actx = null;
+function audio() {
+  try {
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      actx = new AC();
+    }
+    if (actx.state !== 'running') actx.resume().catch(() => {});
+    return actx;
+  } catch (e) { return null; }
+}
+// ให้เสียงดังแม้เปิดสวิตช์โหมดเงียบ (iOS 17+)
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+// iOS ต้องปลดล็อกเสียงจากการแตะจอครั้งแรก
+document.addEventListener('pointerdown', () => {
+  const c = audio();
+  if (c && !c._unlocked) {
+    const b = c.createBuffer(1, 1, 22050), s = c.createBufferSource();
+    s.buffer = b; s.connect(c.destination); s.start(0); c._unlocked = true;
+  }
+}, true);
+
+/* เสียง "ติ๊ด" เหมือนเครื่องยิงบาร์โค้ด */
+function beepScan() {
+  if (!S.beep) return;
+  const c = audio(); if (!c) return;
+  const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
+  o.type = 'square'; o.frequency.value = 2650;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.18, t + 0.005);
+  g.gain.setValueAtTime(0.18, t + 0.07);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+  o.connect(g).connect(c.destination);
+  o.start(t); o.stop(t + 0.1);
+}
+
+/* เสียง "แชะ" ชัตเตอร์กล้อง */
+function noiseBurst(c, t, dur, vol, hp) {
+  const len = Math.max(1, Math.floor(c.sampleRate * dur));
+  const buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  const src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  src.buffer = buf; f.type = 'highpass'; f.frequency.value = hp; g.gain.value = vol;
+  src.connect(f).connect(g).connect(c.destination);
+  src.start(t);
+}
+function shutterSound() {
+  if (!S.shutter) return;
+  const c = audio(); if (!c) return;
+  const t = c.currentTime + 0.005;
+  noiseBurst(c, t, 0.035, 1.0, 1800);          // แช
+  noiseBurst(c, t + 0.075, 0.06, 0.8, 900);    // ะ
+  const o = c.createOscillator(), g = c.createGain();   // เสียงกลไกทุ้ม ๆ
+  o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(80, t + 0.05);
+  g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+  o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.07);
+}
+
+function feedback(kind) {
+  const fl = $('flash'); fl.style.opacity = .8; setTimeout(() => fl.style.opacity = 0, 90);
+  if (navigator.vibrate) navigator.vibrate(60);
+  if (kind === 'shot') shutterSound(); else beepScan();
+}
+
+/* ===== utils ===== */
+function makePreview() {
+  const c = document.createElement('canvas'), s = Math.min(1, 720 / Math.max(shotCanvas.width, shotCanvas.height));
+  c.width = shotCanvas.width * s | 0; c.height = shotCanvas.height * s | 0;
+  c.getContext('2d').drawImage(shotCanvas, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', .7);
+}
+const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const thDate = d => d.getDate() + ' ' + TH_MON[d.getMonth()] + (d.getFullYear() + 543);   // 20 ม.ค.2569
+const thTime = d => pad(d.getHours()) + '.' + pad(d.getMinutes()) + '.' + pad(d.getSeconds()); // 17.30.49
+function thFromIso(s) {                       // '2026-01-20 17:30:49' → '20 ม.ค.2569 17.30.49'
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!m) return s;
+  const d = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  return thDate(d) + ' ' + thTime(d);
+}
+const pad = n => String(n).padStart(2, '0');
+const ymd = (d, sep = '') => d.getFullYear() + sep + pad(d.getMonth() + 1) + sep + pad(d.getDate());
+const hms = (d, sep = '') => pad(d.getHours()) + sep + pad(d.getMinutes()) + sep + pad(d.getSeconds());
+const stamp = d => ymd(d) + '_' + hms(d);                 // 20261105_081130
+const fmt = d => ymd(d, '-') + ' ' + hms(d, ':');          // 2026-11-05 08:11:30
+const safe = s => s.replace(/[\\\/:*?"<>|\s]+/g, '-').slice(0, 80);
+
+/* ===== start ===== */
+(async () => {
+  db = await idbOpen();
+  const saved = await idbAll();
+  saved.sort((a, b) => a.id < b.id ? -1 : 1).forEach(j => {
+    j.status = 'pending'; j.tries = 0; j.busy = false;
+    jobs.unshift(j);
+  });
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission !== 'function') startMotion(); // Android ไม่ต้องขออนุญาต
+  await initDetector();
+  await initCamera();
+  if (!IN_GAS && !API_URL) openSettings();
+  pump();
+})();
+</script>
+</body>
+</html>
