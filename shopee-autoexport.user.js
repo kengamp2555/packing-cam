@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ
 // @namespace    packing-cam
-// @version      3.1
+// @version      3.2
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @grant        GM_xmlhttpRequest
@@ -40,6 +40,7 @@
   const INCOME_BACKFILL_MONTHS = 12;     // ครั้งแรกของแต่ละร้าน: ดึงย้อนหลังกี่เดือน (ไฟล์ละ 1 เดือน)
   const INCOME_OVERLAP_DAYS = 3;         // ดึงทับวันเดิมกี่วัน (กันรายการที่โอนช้า · ระบบแทนที่ข้อมูลช่วงซ้ำให้เอง ไม่ซ้ำ)
   const INCOME_SKIP_HOURS = 3;           // เปิดหน้าซ้ำภายในกี่ชั่วโมงหลังดึงสำเร็จ ไม่ดึงอีก
+  const ORDER_OVERLAP_DAYS = 45;         // คำสั่งซื้อ: ดึงทับย้อนหลังกี่วัน (สถานะยกเลิก/คืนยังเปลี่ยนได้)
   const INCOME_WAIT_MIN = 40;            // รอ Shopee เตรียมไฟล์รายรับสูงสุดกี่นาที (ปกติ 3–8 นาที)
 
   /* ---------------- ตั้งค่า (ลิงก์ /exec + รหัส เหมือนในแอป Packing Cam) ---------------- */
@@ -63,7 +64,7 @@
   GM_registerMenuCommand('⚙️ ตั้งค่าลิงก์/รหัส Packing Cam', () => settings(true));
   GM_registerMenuCommand('💰 ดึงรายรับใหม่ตั้งแต่ต้น (ย้อนหลัง ' + INCOME_BACKFILL_MONTHS + ' เดือน)', () => {
     if (!myShop) return alert('เปิดหน้า "รายรับของฉัน" ก่อน แล้วลองใหม่');
-    GM_setValue('incTo_' + myShop.toLowerCase(), ''); GM_setValue('incOk_' + myShop.toLowerCase(), 0); alert('ล้างแล้ว – รีเฟรชหน้ารายรับของฉัน');
+    GM_setValue('incTo_' + myShop.toLowerCase(), ''); GM_setValue('ordTo_' + myShop.toLowerCase(), ''); GM_setValue('incOk_' + myShop.toLowerCase(), 0); alert('ล้างแล้ว – รีเฟรชหน้ารายรับของฉัน');
   });
   GM_registerMenuCommand('🏪 ล้างการจับคู่ชื่อร้าน', () => { GM_setValue('shopMap', '{}'); myShop = ''; alert('ล้างแล้ว – รีเฟรชหน้า'); });
 
@@ -319,6 +320,55 @@
     return { name: job.name || ('Income.โอนเงินสำเร็จ.th.' + job.from.replace(/-/g, '') + '_' + job.to.replace(/-/g, '') + '.xlsx'), blob };
   }
 
+
+  /* ================= 🧾 คำสั่งซื้อทั้งหมด (Order.all) → FIN_ShopeeItems / SALES_ ================= */
+  const cds = () => '&SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2';
+  async function ordRequest(from, to) {
+    const j = await fetch('/api/v3/order/request_order_report?start_date=' + from + '&end_date=' + to +
+      '&language=th&screening_condition=order_creation_date&parcel_level_filter=0' + cds(), { credentials: 'include' }).then(r => r.json()).catch(() => ({}));
+    if (j.code !== 0 || !j.data || !j.data.report_id) throw new Error('Shopee ไม่รับคำขอไฟล์คำสั่งซื้อ ' + from + ' → ' + to + ': ' + (j.user_message || j.message || ''));
+    return { id: j.data.report_id, name: j.data.report_file_name, from, to, n: j.data.record_numbers, t0: Date.now() };
+  }
+  async function ordFetch(job, st) {
+    for (;;) {
+      const g = await fetch('/api/v3/settings/get_report/?report_id=' + job.id + cds(), { credentials: 'include' }).then(r => r.json()).catch(() => ({}));
+      const s = g.data && g.data.status;
+      if (s === 2 || s === 3) { job.name = g.data.report_file_name || job.name; break; }
+      if (g.code === 0 && s !== 1) throw new Error('Shopee เตรียมไฟล์คำสั่งซื้อไม่สำเร็จ (สถานะ ' + s + ')');
+      if (Date.now() - job.t0 > 15 * 60e3) throw new Error('Shopee เตรียมไฟล์คำสั่งซื้อนานเกิน 15 นาที');
+      st('⏳ เตรียมไฟล์คำสั่งซื้อ ' + job.from + ' → ' + job.to + '…');
+      await sleep(4000);
+    }
+    const res = await fetch('/api/v3/settings/download_report/?report_id=' + job.id + cds(), { credentials: 'include' });
+    if (!res.ok) throw new Error('ดาวน์โหลดไฟล์คำสั่งซื้อไม่ได้ (HTTP ' + res.status + ')');
+    const blob = await res.blob();
+    if (blob.size < 500) throw new Error('ไฟล์คำสั่งซื้อที่ได้ไม่ถูกต้อง');
+    return { name: job.name || ('Order.all.' + job.from.replace(/-/g, '') + '_' + job.to.replace(/-/g, '') + '.xlsx'), blob };
+  }
+  /** ดึง Order.all ทีละเดือน: ครั้งแรกย้อนหลัง INCOME_BACKFILL_MONTHS เดือน · ครั้งต่อไปทับย้อนหลัง ORDER_OVERLAP_DAYS วัน */
+  async function syncOrders(shop, k, st) {
+    const today = ymd(new Date()), lastTo = GM_getValue('ordTo_' + k, '');
+    let from;
+    if (lastTo) from = addDays(lastTo, -ORDER_OVERLAP_DAYS);
+    else { const d = new Date(); d.setMonth(d.getMonth() - INCOME_BACKFILL_MONTHS + 1, 1); from = ymd(d); }
+    const chunks = incChunks(from, today);
+    let n = 0, skipped = 0;
+    for (const [a, b] of chunks) {
+      st('[' + shop + '] 🧾 คำสั่งซื้อ (' + (n + skipped + 1) + '/' + chunks.length + ') ' + a + ' → ' + b + '…');
+      let job;
+      try { job = await ordRequest(a, b); }
+      catch (e) { st('[' + shop + '] 🧾 Shopee ให้รอ 1 นาที…'); await sleep(65000); job = await ordRequest(a, b); }   // Shopee จำกัดความถี่ → รอแล้วลองใหม่ 1 ครั้ง
+      if (job.n === 0) { skipped++; GM_setValue('ordTo_' + k, b < today ? b : today); await sleep(3000); continue; }   // เดือนที่ไม่มีออเดอร์
+      const f = await ordFetch(job, m => st('[' + shop + '] 🧾 ' + m));
+      st('[' + shop + '] 🧾 ส่ง ' + f.name + '…');
+      await api('shopeeUpload', { shop, name: f.name, data: await blobToBase64(f.blob), importNow: false });
+      GM_setValue('ordTo_' + k, b < today ? b : today);       // บันทึกทีละไฟล์ → หยุดกลางทางก็ทำต่อได้
+      n++;
+      await sleep(3000);                                       // เว้นระยะ ไม่ถี่เกินไป
+    }
+    return n;
+  }
+
   let incRunning = false;
   async function runIncome(force) {
     if (incRunning || running) return; incRunning = true;
@@ -341,6 +391,11 @@
         st('🟢 [' + shop + '] ดึงรายรับไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อดึงอีกครั้ง');
         return;
       }
+      // 1) คำสั่งซื้อ (ชื่อสินค้า/SKU/จำนวน) – ทำก่อนเพราะเร็ว · ผิดพลาดก็ทำรายรับต่อได้
+      let ordN = 0, ordErr = '';
+      try { ordN = await syncOrders(shop, k, st); } catch (e) { ordErr = e.message; console.warn('[Packing Cam คำสั่งซื้อ]', e); }
+
+      // 2) รายรับ (โอนแล้ว)
       let from;
       if (lastTo) from = addDays(lastTo, -INCOME_OVERLAP_DAYS);
       else { const d = new Date(); d.setMonth(d.getMonth() - INCOME_BACKFILL_MONTHS + 1, 1); from = ymd(d); }
@@ -371,7 +426,7 @@
         : !imp ? '' : imp.error ? ' • นำเข้าไม่สำเร็จ: ' + imp.error
         : imp.skipped ? ' • นำเข้าภายใน ~10 นาที'
         : fin ? ' • นำเข้าแล้ว ' + fin.orders + ' ออเดอร์ ' + (fin.ok ? '✓ ตรงกับหน้าสรุป' : '⚠️ ยอดไม่ตรง ดูแจ้งเตือน') : ' • นำเข้าแล้ว';
-      st('✅ [' + shop + '] ส่งไฟล์รายรับ ' + n + ' ไฟล์ (' + chunks[0][0] + ' → ' + today + ') เวลา ' + t + impTxt);
+      st('✅ [' + shop + '] รายรับ ' + n + ' ไฟล์ · คำสั่งซื้อ ' + (ordErr ? '❌ ' + ordErr : ordN + ' ไฟล์') + ' (' + chunks[0][0] + ' → ' + today + ') เวลา ' + t + impTxt);
     } catch (e) {
       st('❌ ' + e.message);
       console.warn('[Packing Cam รายรับ]', e);
