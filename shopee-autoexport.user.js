@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.5
+// @version      3.6
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -393,6 +393,49 @@
     return n;
   }
 
+
+  /* ================= 📄 รายงานการเงินรายเดือน (PDF) → Drive "เอกสารภาษี/Shopee/<ร้าน>" ================= */
+  const ST = '/api/v4/accounting/pc/seller_income/income_statement/';
+  const stPost = (p, b) => fetch(ST + p + '?SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2', { method: 'POST', credentials: 'include',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+  async function stPdf(month) {                                 // month = 'YYYY-MM'
+    const [y, m] = month.split('-').map(Number), last = new Date(y, m, 0).getDate();
+    const g = await stPost('request_income_statement_batch_generate',
+      { statement_type: 'month', start_time: month.replace('-', '') + '01', end_time: month.replace('-', '') + String(last).padStart(2, '0') });
+    if (g.code !== 0 || !g.document_id) throw new Error('Shopee ไม่สร้าง PDF ' + month + ': ' + (g.user_message || g.message || ''));
+    const t0 = Date.now();
+    for (;;) {
+      await sleep(3000);
+      const s = await stPost('get_generated_income_statements_by_ids', { document_ids: [g.document_id] });
+      const d = s.list && s.list[0], stt = d && d.status;
+      if (stt === 2 || stt === 3) break;
+      if (s.code === 0 && stt !== 1) throw new Error('Shopee สร้าง PDF ' + month + ' ไม่สำเร็จ (สถานะ ' + stt + ')');
+      if (Date.now() - t0 > 5 * 60e3) throw new Error('Shopee สร้าง PDF ' + month + ' นานเกิน 5 นาที');
+    }
+    const q = await fetch('/api/v4/accounting/pc/seller_income/income_report/query_income_report?document_id=' + g.document_id + cds(), { credentials: 'include' }).then(r => r.json());
+    const path = q.data && q.data.file_path; if (!path) throw new Error('ไม่พบไฟล์ PDF ' + month);
+    const r = await fetch('/api/v4/accounting/pc/seller_income/income_report/get_income_document_file?path=' + encodeURIComponent(path) +
+      '&content_type=application%2Fpdf' + cds(), { credentials: 'include' });
+    const blob = await r.blob();
+    if (!r.ok || blob.size < 1000) throw new Error('ดาวน์โหลด PDF ' + month + ' ไม่ได้ (HTTP ' + r.status + ')');
+    return blob;
+  }
+  /** PDF เดือนที่จบแล้วที่ยังไม่มีใน Drive (ย้อนหลัง INCOME_BACKFILL_MONTHS เดือน) */
+  async function syncStatements(shop, st) {
+    const have = new Set(((await api('taxDocList', { platform: 'Shopee', shop }, true)).months) || []);
+    const months = [], d = new Date(); d.setDate(1);
+    for (let i = 1; i <= INCOME_BACKFILL_MONTHS; i++) { d.setMonth(d.getMonth() - 1); months.push(ymd(d).slice(0, 7)); }
+    const todo = months.filter(m => !have.has(m) && m >= '2025-01').reverse();
+    let n = 0;
+    for (const m of todo) {
+      st('[' + shop + '] 📄 รายงานการเงิน PDF ' + m + ' (' + (n + 1) + '/' + todo.length + ')…');
+      const blob = await stPdf(m);
+      await api('taxDocUpload', { platform: 'Shopee', shop, month: m, kind: 'รายงานการเงิน', data: await blobToBase64(blob) });
+      n++; await sleep(2000);
+    }
+    return n;
+  }
+
   let incRunning = false;
   async function runIncome(force) {
     if (incRunning || running) return; incRunning = true;
@@ -418,6 +461,10 @@
       // 1) คำสั่งซื้อ (ชื่อสินค้า/SKU/จำนวน) – ทำก่อนเพราะเร็ว · ผิดพลาดก็ทำรายรับต่อได้
       let ordN = 0, ordErr = '';
       try { ordN = await syncOrders(shop, k, st); } catch (e) { ordErr = e.message; console.warn('[Packing Cam คำสั่งซื้อ]', e); }
+
+      // 1.5) PDF รายงานการเงินรายเดือน (แนบยื่นภาษี) – เฉพาะเดือนที่ยังไม่มีใน Drive
+      let pdfN = 0, pdfErr = '';
+      try { pdfN = await syncStatements(shop, st); } catch (e) { pdfErr = e.message; console.warn('[Packing Cam PDF]', e); }
 
       // 2) รายรับ (โอนแล้ว)
       let from;
@@ -450,7 +497,7 @@
         : !imp ? '' : imp.error ? ' • นำเข้าไม่สำเร็จ: ' + imp.error
         : imp.skipped ? ' • นำเข้าภายใน ~10 นาที'
         : fin ? ' • นำเข้าแล้ว ' + fin.orders + ' ออเดอร์ ' + (fin.ok ? '✓ ตรงกับหน้าสรุป' : '⚠️ ยอดไม่ตรง ดูแจ้งเตือน') : ' • นำเข้าแล้ว';
-      st('✅ [' + shop + '] รายรับ ' + n + ' ไฟล์ · คำสั่งซื้อ ' + (ordErr ? '❌ ' + ordErr : ordN + ' ไฟล์') + ' (' + chunks[0][0] + ' → ' + today + ') เวลา ' + t + impTxt);
+      st('✅ [' + shop + '] รายรับ ' + n + ' ไฟล์ · คำสั่งซื้อ ' + (ordErr ? '❌ ' + ordErr : ordN + ' ไฟล์') + ' · PDF ' + (pdfErr ? '❌ ' + pdfErr : pdfN + ' เดือน') + ' (' + chunks[0][0] + ' → ' + today + ') เวลา ' + t + impTxt);
     } catch (e) {
       st('❌ ' + e.message);
       console.warn('[Packing Cam รายรับ]', e);
