@@ -1,16 +1,20 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.6
+// @version      3.7
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
+// @match        https://sellercenter.lazada.co.th/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        unsafeWindow
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
+// @connect      lazada.co.th
+// @connect      fbprivacy.lazada.co.th
 // @run-at       document-idle
 // @updateURL    https://kengamp2555.github.io/packing-cam/shopee-autoexport.user.js
 // @downloadURL  https://kengamp2555.github.io/packing-cam/shopee-autoexport.user.js
@@ -574,6 +578,71 @@
     } finally { lnwRunning = false; btn.disabled = false; }
   }
 
+
+  /* ================= 📄 Lazada: PDF สรุปธุรกรรมรายเดือน → Drive "เอกสารภาษี/Lazada/<ร้าน>" ================= */
+  const LZ_SHOP = 'KengAmp';                                   // ชื่อร้าน Lazada (ตรงกับ FIN_Lines / TAX_Payers)
+  const onLazada = () => location.hostname === 'sellercenter.lazada.co.th' && /\/finance\//.test(location.pathname);
+  let lzRunning = false;
+  function lzReq(api, data) {
+    const mt = unsafeWindow.lib && unsafeWindow.lib.mtop;
+    if (!mt) return Promise.reject(new Error('หน้า Lazada ยังโหลดไม่เสร็จ – รีเฟรชแล้วลองใหม่'));
+    return mt.request({ v: '1.0', appKey: '4272', timeout: 30000, H5Request: true, type: 'GET', method: 'GET', api, url: api,
+      data: Object.assign({ _timezone: -7 }, data), dataType: 'json', valueType: 'original', 'x-i18n-regionID': 'LAZADA_TH' });
+  }
+  function gmBlob(url) {
+    return new Promise((res, rej) => GM_xmlhttpRequest({ method: 'GET', url, responseType: 'blob', timeout: 120000,
+      onload: r => r.status === 200 && r.response && r.response.size > 1000 ? res(r.response) : rej(new Error('ดาวน์โหลด PDF Lazada ไม่ได้ (HTTP ' + r.status + ')')),
+      onerror: () => rej(new Error('ดาวน์โหลด PDF Lazada ไม่ได้')), ontimeout: () => rej(new Error('ดาวน์โหลด PDF Lazada ช้าเกินไป')) }));
+  }
+  async function lzPdf(month) {                                 // 'YYYY-MM'
+    const [y, m] = month.split('-').map(Number);
+    const start = Date.UTC(y, m - 1, 1) - 7 * 3600e3, end = Date.UTC(y, m, 1) - 7 * 3600e3 - 1000;   // เวลาไทย
+    const c = await lzReq('mtop.lazada.finance.sellerfund.statementPdf.createTask', { startDate: start, endDate: end });
+    const id = c && c.data && c.data.data;
+    if (!id) throw new Error('Lazada ไม่สร้าง PDF ' + month + ': ' + ((c && c.data && c.data.errorMsg) || ''));
+    const t0 = Date.now();
+    for (;;) {
+      await sleep(3000);
+      const q = await lzReq('mtop.lazada.finance.sellerfund.statementPdf.queryTask', { current: 1, pageSize: 20 });
+      const f = ((q && q.data && q.data.data && q.data.data.dataSource) || []).find(x => x.id === id);
+      if (f && f.statusCode === 2 && f.outputFile) return gmBlob(f.outputFile);
+      if (f && f.statusCode > 2) throw new Error('Lazada สร้าง PDF ' + month + ' ไม่สำเร็จ (' + f.status + ')');
+      if (Date.now() - t0 > 5 * 60e3) throw new Error('Lazada สร้าง PDF ' + month + ' นานเกิน 5 นาที');
+    }
+  }
+  async function runLazada(force) {
+    if (lzRunning) return; lzRunning = true;
+    const st = msg => { label.textContent = msg; };
+    btn.disabled = true;
+    try {
+      if (!settings(false)) throw new Error('ยังไม่ได้ตั้งค่า');
+      const lastOk = +GM_getValue('lzPdfOk', 0);
+      if (!force && Date.now() - lastOk < INCOME_SKIP_HOURS * 3600e3) {
+        st('🟢 Lazada PDF ตรวจไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อตรวจอีกครั้ง'); return;
+      }
+      for (let i = 0; i < 20 && !(unsafeWindow.lib && unsafeWindow.lib.mtop); i++) await sleep(1000);
+      const have = new Set(((await api('taxDocList', { platform: 'Lazada', shop: LZ_SHOP }, true)).months) || []);
+      const months = [], d = new Date(); d.setDate(1);
+      for (let i = 1; i <= INCOME_BACKFILL_MONTHS; i++) { d.setMonth(d.getMonth() - 1); months.push(ymd(d).slice(0, 7)); }
+      const todo = months.filter(m => !have.has(m)).reverse();
+      let n = 0; const fails = [];
+      for (const m of todo) {
+        try {
+          st('📄 Lazada PDF ' + m + ' (' + (n + fails.length + 1) + '/' + todo.length + ')…');
+          const blob = await lzPdf(m);
+          await api('taxDocUpload', { platform: 'Lazada', shop: LZ_SHOP, month: m, kind: 'รายงานการเงิน', data: await blobToBase64(blob) });
+          n++;
+        } catch (e) { fails.push(m + ': ' + e.message); console.warn('[Packing Cam Lazada PDF]', e); }
+        await sleep(2000);
+      }
+      GM_setValue('lzPdfOk', Date.now());
+      st((fails.length ? '⚠️' : '✅') + ' Lazada PDF ใหม่ ' + n + ' เดือน' + (todo.length ? '' : ' (มีครบแล้ว)') + (fails.length ? ' · ไม่สำเร็จ ' + fails.length + ' – ' + fails[0] : '') +
+        ' เวลา ' + new Date().toTimeString().slice(0, 5));
+    } catch (e) {
+      st('❌ ' + e.message); console.warn('[Packing Cam Lazada]', e);
+    } finally { lzRunning = false; btn.disabled = false; }
+  }
+
   /* ---------------- UI ---------------- */
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:99999;display:none;flex-direction:column;align-items:flex-end;gap:6px;font-family:system-ui,-apple-system,sans-serif';
@@ -583,16 +652,19 @@
   const label = document.createElement('div');
   label.style.cssText = 'background:rgba(0,0,0,.8);color:#fff;border-radius:10px;padding:8px 12px;font-size:13px;max-width:380px;line-height:1.5';
   label.textContent = 'กำลังเตรียม…';
-  btn.onclick = () => onLnw() ? runLnw(true) : onIncome() ? runIncome(true) : run('', 'manual');
+  btn.onclick = () => onLazada() ? runLazada(true) : onLnw() ? runLnw(true) : onIncome() ? runIncome(true) : run('', 'manual');
   box.append(label, btn);
   document.body.appendChild(box);
-  let wasIncome = false, wasLnw = false;
+  let wasIncome = false, wasLnw = false, wasLz = false;
   setInterval(() => {
-    box.style.display = onPage() || onIncome() || onLnw() ? 'flex' : 'none';
-    btn.textContent = onLnw() ? '🏪 ดึง LnwShop → FIN' : onIncome() ? '💰 ดึงรายรับ → FIN' : '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
+    box.style.display = onPage() || onIncome() || onLnw() || onLazada() ? 'flex' : 'none';
+    btn.textContent = onLazada() ? '📄 PDF Lazada → Drive' : onLnw() ? '🏪 ดึง LnwShop → FIN' : onIncome() ? '💰 ดึงรายรับ → FIN' : '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
     const lnw = onLnw();
     if (lnw && !wasLnw) { label.textContent = '🏪 เตรียมดึง LnwShop…'; setTimeout(() => runLnw(false), 2500); }   // เปิดหลังร้าน LnwShop → ดึงเอง
     wasLnw = lnw;
+    const lzOn = onLazada();
+    if (lzOn && !wasLz) { label.textContent = '📄 เตรียมตรวจ PDF Lazada…'; setTimeout(() => runLazada(false), 3000); }   // เปิดหน้าการเงิน Lazada → ดึงเอง
+    wasLz = lzOn;
     const inc = onIncome();
     if (inc && !wasIncome) { label.textContent = '💰 เตรียมดึงรายรับ…'; setTimeout(() => runIncome(false), 2500); }   // เข้าหน้ารายรับ → ดึงเอง
     wasIncome = inc;
