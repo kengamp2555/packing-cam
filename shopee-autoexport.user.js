@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.8
+// @version      3.9
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -48,6 +48,8 @@
   const INCOME_SKIP_HOURS = 3;           // เปิดหน้าซ้ำภายในกี่ชั่วโมงหลังดึงสำเร็จ ไม่ดึงอีก
   const ORDER_OVERLAP_DAYS = 45;         // คำสั่งซื้อ: ดึงทับย้อนหลังกี่วัน (สถานะยกเลิก/คืนยังเปลี่ยนได้)
   const INCOME_WAIT_MIN = 40;            // รอ Shopee เตรียมไฟล์รายรับสูงสุดกี่นาที (ปกติ 3–8 นาที)
+  const TOSHIP_BACK_DAYS = 1;            // 🚚 ที่ต้องจัดส่ง: ดึงออเดอร์ตั้งแต่กี่วันก่อน (1 = เมื่อวาน 00:00 ถึงวันนี้)
+  const TOSHIP_HOURS = [8, 14];          // ดึงเองทุกชั่วโมงช่วง 8:00–14:59 (นอกช่วงนี้ดึงเมื่อกด 🔄 ในกระดิ่งของแอปเท่านั้น)
 
   /* ---------------- ตั้งค่า (ลิงก์ /exec + รหัส เหมือนในแอป Packing Cam) ---------------- */
   function normalizeApiUrl(u) {
@@ -447,6 +449,36 @@
   }
 
 
+  /* ================= 🚚 ที่ต้องจัดส่ง (คำสั่งซื้อเมื่อวาน–วันนี้) → ShopeeToShip (กระดิ่งในแอป Packing Cam) ================= */
+  let tsRunning = false;
+  async function syncToShip(shop, why) {
+    if (tsRunning || running) return; tsRunning = true;
+    const k = shop.toLowerCase(), st = msg => { label.textContent = msg; };
+    try {
+      await withLock('toship|' + k, st, async () => {
+        const d = new Date(); d.setDate(d.getDate() - TOSHIP_BACK_DAYS);
+        const from = ymd(d), to = ymd(new Date());
+        st('🚚 [' + shop + '] ดึงรายการที่ต้องจัดส่ง ' + from + ' → ' + to + (why ? ' (' + why + ')' : '') + '…');
+        let job;
+        try { job = await ordRequest(from, to); }
+        catch (e) { st('🚚 [' + shop + '] Shopee ให้รอ 1 นาที…'); await sleep(65000); job = await ordRequest(from, to); }
+        if (job.n !== 0) {
+          const f = await ordFetch(job, m => st('🚚 [' + shop + '] ' + m));
+          await api('shopeeUpload', { shop, name: 'ToShip.' + from.replace(/-/g, '') + '_' + to.replace(/-/g, '') + '.xlsx', data: await blobToBase64(f.blob), importNow: true });
+        }
+        await sset('tsOk_' + k, Date.now());
+        st('🟢 [' + shop + '] อัปเดตที่ต้องจัดส่งแล้ว ' + new Date().toTimeString().slice(0, 5) + ' • พร้อมรับคำขอจากแอป');
+      });
+    } catch (e) { st('❌ ที่ต้องจัดส่ง: ' + e.message); console.warn('[Packing Cam ที่ต้องจัดส่ง]', e); }
+    finally { tsRunning = false; }
+  }
+  function toShipDue(shop) {
+    const h = new Date().getHours();
+    if (h < TOSHIP_HOURS[0] || h > TOSHIP_HOURS[1]) return false;
+    return Date.now() - +sget('tsOk_' + shop.toLowerCase(), 0) > 55 * 60000;
+  }
+
+
   /* ================= 📄 รายงานการเงินรายเดือน (PDF) → Drive "เอกสารภาษี/Shopee/<ร้าน>" ================= */
   const ST = '/api/v4/accounting/pc/seller_income/income_statement/';
   const stPost = (p, b) => fetch(ST + p + '?SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2', { method: 'POST', credentials: 'include',
@@ -768,6 +800,9 @@
           label.textContent = '📥 ได้รับคำขอจากแอป – เริ่มทำงาน…';
           await run(myShop, 'queue');
         }
+        if (!shared) await loadShared();
+        if (r.toship) await syncToShip(myShop, 'กด 🔄 ในแอป');
+        else if (toShipDue(myShop)) await syncToShip(myShop, 'รอบรายชั่วโมง');
       } catch (e) { /* เน็ตหลุดชั่วคราว รอบหน้าค่อยลองใหม่ */ }
     }
   })();

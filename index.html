@@ -499,7 +499,8 @@ function loadHold(fresh) {
   if (fresh) renderToday('⏳ กำลังดึงข้อมูลล่าสุดจาก Lazada… (ประมาณ 20–60 วินาที)');
   return callApi(fresh ? 'todayRefresh' : 'today', {}).then(r => {
     todayBusy = false;
-    todayData = r; holdItems = r.hold || []; renderHold(); renderToday(r.refreshError ? '⚠️ อัปเดตจาก Lazada ไม่สำเร็จ: ' + r.refreshError : (fresh ? '✅ อัปเดตแล้ว' : ''));
+    todayData = r; holdItems = r.hold || []; renderHold(); renderToday(r.refreshError ? '⚠️ อัปเดตจาก Lazada ไม่สำเร็จ: ' + r.refreshError : (fresh ? '✅ Lazada อัปเดตแล้ว · Shopee กำลังดึงจากแท็บ Mac (1–3 นาที) แล้วจะโหลดให้เอง' : ''));
+    if (fresh) setTimeout(() => loadHold(false), 150000);   // Shopee ใช้เวลา ~1–3 นาที → โหลดสรุปใหม่อีกครั้ง
   }).catch(e => { todayBusy = false; renderToday('❌ โหลดไม่สำเร็จ: ' + (e.message || e)); });
 }
 function holdDone(track, btn) {
@@ -531,14 +532,23 @@ function renderToday(msg) {
   const L = r.lazada, sp = r.shopee, o = r.other;
   const lzOk = L.notPackedCount === 0;
   h += '<h3>📦 แพควันนี้ ' + r.total + ' กล่อง</h3><div class="stat">' +
-    '<div>Lazada<b>' + L.packed + '</b><span class="' + (lzOk ? 'ok' : 'bad') + '">' + (lzOk ? '✅ ครบตามที่ต้องส่ง' : '⚠️ ยังไม่แพค ' + L.notPackedCount) + '</span></div>' +
-    '<div>Shopee<b>' + sp.packed + '</b><span class="mut">เทียบยอดสั่งยังไม่ได้</span></div>' +
+    '<div>Lazada<b>' + L.packed + ' / ' + (L.packed + L.notPackedCount) + '</b><span class="' + (lzOk ? 'ok' : 'bad') + '">' + (lzOk ? '✅ ครบตามที่ต้องส่ง' : '⚠️ ยังไม่แพค ' + L.notPackedCount) + '</span></div>' +
+    (sp.shops && sp.shops.length ? sp.shops.map(x => '<div>Shopee ' + esc(x.shop) + '<b>' + x.packed + (x.expect ? ' / ' + x.expect : '') + '</b>' +
+        (x.missingCount ? '<span class="bad">⚠️ ยังไม่แพค ' + x.missingCount + '</span>' : x.expect ? '<span class="ok">✅ ครบตามที่ต้องส่ง</span>' : '<span class="mut">ไม่มีที่ต้องส่ง</span>') +
+        (x.notArranged ? '<br><span class="bad">🕒 ยังไม่กดจัดส่ง ' + x.notArranged + '</span>' : '') + '</div>').join('')
+      : '<div>Shopee<b>' + sp.packed + '</b><span class="mut">ยังไม่มีข้อมูลที่ต้องจัดส่ง</span></div>') +
     (o.packed ? '<div>ไม่ทราบช่องทาง<b>' + o.packed + '</b><span class="mut">Flash/อื่น ๆ</span></div>' : '') +
     (r.noBarcode ? '<div>ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b></div>' : '') + '</div>';
   if (L.notPackedCount) h += '<details open><summary>Lazada รอส่งแต่ยังไม่ได้แพค (' + L.notPackedCount + ')</summary><ul>' +
     L.notPacked.map(x => '<li>' + esc(x.track) + ' <span class="mut">ออเดอร์ ' + esc(x.order) + '</span></li>').join('') + '</ul></details>';
+  (sp.shops || []).forEach(x => {
+    if (x.missingCount) h += '<details open><summary>Shopee ' + esc(x.shop) + ' กดจัดส่งแล้วแต่ยังไม่ได้แพค (' + x.missingCount + ')</summary><ul>' +
+      x.missing.map(m => '<li>' + esc(m.track) + ' <span class="mut">' + esc(m.order) + (m.items ? ' · ' + esc(m.items) : '') + '</span></li>').join('') + '</ul></details>';
+    if (x.notArranged) h += '<p class="bad" style="margin:4px 0">🕒 Shopee ' + esc(x.shop) + ': ยังไม่กดจัดส่ง ' + x.notArranged + ' ออเดอร์' + (x.shipBy ? ' (ต้องส่งภายใน ' + esc(x.shipBy.slice(5, 16)) + ')' : '') + '</p>';
+    h += '<p class="mut" style="margin:2px 0">Shopee ' + esc(x.shop) + ': ข้อมูลล่าสุด ' + esc(String(x.updatedAt).slice(11, 16) || '-') + ' น. · ' + (x.tabOnline ? '🟢 แท็บ Mac เปิดอยู่' : '⚪ แท็บ Mac ไม่ได้เปิด – กด 🔄 แล้ว Shopee จะไม่อัปเดต') + '</p>';
+  });
   if (o.packed) h += '<details><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary><ul>' + o.list.map(x => '<li>' + esc(x.track) + '</li>').join('') + '</ul></details>';
-  h += '<p class="mut" style="margin-top:10px">• Lazada: เทียบกับออเดอร์ที่สถานะ "รอส่ง" ใน Lazada ณ รอบดึงล่าสุด · Shopee: ยังไม่มีข้อมูลออเดอร์ที่ต้องส่งแบบสด จึงแสดงเฉพาะจำนวนที่แพค (แยกจากรูปแบบเลขพัสดุ SPX)<br>• นับ 1 กล่องต่อ 1 บาร์โค้ด (ถ่ายซ้ำไม่นับเพิ่ม)</p>';
+  h += '<p class="mut" style="margin-top:10px">• Lazada: เทียบกับออเดอร์ที่สถานะ "รอส่ง" ใน Lazada ณ รอบดึงล่าสุด · Shopee: เทียบกับออเดอร์ที่กดจัดส่งแล้ว (มีเลขพัสดุ) จากแท็บ Seller Centre บน Mac – อัปเดตเองทุกชั่วโมง 8:00–14:00 · กด 🔄 แล้ว Shopee ใช้เวลา 1–3 นาที<br>• นับ 1 กล่องต่อ 1 บาร์โค้ด (ถ่ายซ้ำไม่นับเพิ่ม)</p>';
   $('todaySheet').innerHTML = h; bindToday();
 }
 function bindToday() {
