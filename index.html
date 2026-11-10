@@ -535,7 +535,8 @@ function renderToday(msg) {
   h += '<h3>📦 รอส่งมอบให้ขนส่ง – ยิงแพคแล้ว <span class="' + (allOk ? 'ok' : r.totalExpect ? 'bad' : '') + '">' + r.totalPacked + ' / ' + r.totalExpect + '</span> กล่อง</h3><div class="stat">' +
     '<div>Lazada<b>' + L.packed + ' / ' + L.expect + '</b>' +
       (L.expect ? (L.notPackedCount ? '<span class="bad">⚠️ ยังไม่ยิง ' + L.notPackedCount + '</span>' : '<span class="ok">✅ ครบ</span>') : '<span class="mut">ไม่มีที่ต้องส่งมอบ</span>') +
-      (L.pending ? '<br><span class="bad">🕒 ที่ต้องบรรจุ ' + L.pending + '</span>' : '') + '</div>' +
+      (L.prepared ? '<br><span class="bad">🕒 ยังไม่กดจัดส่ง ' + L.prepared + '</span>' : '') +
+      (L.pending ? '<br><span class="bad">🆕 สั่งมาใหม่ ' + L.pending + '</span>' : '') + '</div>' +
     (sp.shops || []).map(x => '<div>Shopee ' + esc(x.shop) + '<b>' + x.packed + ' / ' + x.expect + '</b>' +
       (!x.updatedAt ? '<span class="mut">⚪ ยังไม่มีข้อมูล – เปิดแท็บร้านนี้แล้วกด 🔄</span>' :
         x.expect ? (x.missingCount ? '<span class="bad">⚠️ ยังไม่ยิง ' + x.missingCount + '</span>' : '<span class="ok">✅ ครบ</span>') : '<span class="mut">ไม่มีที่ดำเนินการแล้ว</span>') +
@@ -552,6 +553,7 @@ function renderToday(msg) {
     h += '<p class="mut" style="margin:2px 0">Shopee ' + esc(x.shop) + ': ข้อมูลล่าสุด ' + esc(String(x.updatedAt).slice(11, 16) || '-') + ' น. · ' + (x.tabOnline ? '🟢 แท็บเปิดอยู่' : '⚪ แท็บไม่ได้เปิด – กด 🔄 แล้ว Shopee จะไม่อัปเดต') + '</p>';
   });
   if (o.packed) h += '<details><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary><ul>' + o.list.map(x => '<li>' + esc(x.track) + '</li>').join('') + '</ul></details>';
+  if (L.prepared || L.pending) h += '<p class="bad" style="margin:4px 0">🕒 Lazada: ' + [L.prepared ? 'ยังไม่กดจัดส่ง (เตรียมจัดส่ง) ' + L.prepared : '', L.pending ? 'สั่งมาใหม่ (ที่ต้องบรรจุ) ' + L.pending : ''].filter(String).join(' · ') + '</p>';
   h += '<p class="mut" style="margin-top:10px">• ตัวหลัง = กล่องที่พิมพ์/กดจัดส่งแล้ว รอขนส่งมารับ ณ เวลาที่อัปเดตล่าสุด (Shopee “ดำเนินการแล้ว” · Lazada “ที่ต้องส่งมอบให้บริษัทขนส่ง”) · ขนส่งรับไปแล้ว = หายจากรายการ<br>• ตัวหน้า = ในกล่องเหล่านั้น ยิงบาร์โค้ดใน Packing Cam แล้วกี่กล่อง · Lazada อัปเดตเองทุกชั่วโมง · Shopee ทุกชั่วโมง 8:00–14:00 · กด 🔄 เพื่ออัปเดตตอนนี้</p>';
   $('todaySheet').innerHTML = h; bindToday();
 }
