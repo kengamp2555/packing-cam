@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.10
+// @version      3.11
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -606,7 +606,7 @@
   const LNW_CHUNK_DAYS = 7;                                    // ไฟล์ละไม่เกิน 7 วัน (LnwShop ให้สูงสุด 2,000 ออเดอร์ต่อไฟล์)
   const LNW_OVERLAP_DAYS = 7;
   const lnwSlug = () => (location.hostname === 'a.lnwstore.com' && location.pathname.split('/')[1]) || '';
-  const onLnw = () => !!lnwSlug() && !/^(pure|static|assets)$/.test(lnwSlug());
+  const onLnw = () => !!lnwSlug() && !/^(pure|static|assets)$/.test(lnwSlug()) && !/print|pdf|label|invoice|shipping|slip/i.test(location.pathname + location.search);   // ไม่ทำงานในหน้าพิมพ์
   let lnwRunning = false;
 
   async function lnwFetch(from, to) {
@@ -739,6 +739,10 @@
 
   /* ---------------- UI ---------------- */
   const box = document.createElement('div');
+  box.id = 'pcAutoBox';
+  const pst = document.createElement('style');                 // ไม่ให้ปุ่ม/ข้อความของสคริปต์ติดไปตอนสั่งพิมพ์
+  pst.textContent = '@media print{#pcAutoBox{display:none!important}}';
+  document.head.appendChild(pst);
   box.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:99999;display:none;flex-direction:column;align-items:flex-end;gap:6px;font-family:system-ui,-apple-system,sans-serif';
   const btn = document.createElement('button');
   btn.textContent = '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
