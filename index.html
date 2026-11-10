@@ -81,7 +81,24 @@
   #recvList .itemList li,#recvCard .itemList li{position:relative;padding:2px 0 2px 14px;margin:0;background:none;border-radius:0;font-size:13px;line-height:1.45;color:#d1d5db}
   .itemList li::before{content:'•';position:absolute;left:2px;color:var(--mut)}
   .itemList .qty{display:inline-block;margin-left:4px;padding:0 7px;border-radius:999px;background:#059669;color:#fff;font-weight:700;font-size:12px}
-  #tabs button#cfg,#tabs button#magBtn{flex:0 0 52px;padding:12px 0;font-size:20px}
+  #tabs button#cfg,#tabs button#magBtn,#tabs button#bellBtn{flex:0 0 52px;padding:12px 0;font-size:20px}
+  #tabs button#bellBtn{position:relative}
+  #bellN{position:absolute;top:2px;right:2px;min-width:20px;height:20px;border-radius:10px;background:#e5484d;color:#fff;font-size:12px;line-height:20px;padding:0 5px}
+  #bellBtn.alarm{background:#5c1a1d;animation:bellRing 1.2s ease-in-out infinite}
+  @keyframes bellRing{0%,60%,100%{transform:rotate(0)}10%{transform:rotate(-14deg)}20%{transform:rotate(12deg)}30%{transform:rotate(-8deg)}40%{transform:rotate(5deg)}}
+  #todayPanel{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.7);display:flex;justify-content:center;align-items:flex-start;overflow-y:auto;padding:12px}
+  #todayPanel[hidden]{display:none}
+  #todayPanel .sheet{background:#15181e;border:1px solid #2a2f3a;border-radius:16px;width:100%;max-width:640px;padding:14px 16px 18px;color:#e8eaf0;font-size:15px;line-height:1.5}
+  #todayPanel h3{margin:14px 0 6px;font-size:17px}
+  #todayPanel .row2{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  #todayPanel .stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+  #todayPanel .stat div{background:#1f2430;border-radius:12px;padding:10px}
+  #todayPanel .stat b{display:block;font-size:26px}
+  #todayPanel .ok{color:#3ecf8e}#todayPanel .bad{color:#ff8b8b}#todayPanel .mut{color:#8b93a7;font-size:13px}
+  #todayPanel details{margin-top:6px}#todayPanel summary{cursor:pointer;color:#8ab4ff}
+  #todayPanel ul{margin:6px 0;padding-left:18px}
+  #todayPanel button{font:inherit;border:0;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer;background:#2b3240;color:#fff}
+  #todayPanel button.pri{background:#3b6cf6}
   /* แว่นขยาย */
   #mag{position:fixed;inset:0;background:#000;z-index:16;display:none;flex-direction:column}
   #magView{flex:1;overflow:hidden;position:relative;touch-action:none}
@@ -189,9 +206,11 @@
     <button id="tFind">🔍 ค้นหา</button>
     <button id="tRecv">📥 รับคืน</button>
     <button id="magBtn">🔎</button>
+    <button id="bellBtn" title="แจ้งเตือนวันนี้">🔔<span id="bellN" hidden></span></button>
     <button id="cfg">⚙️</button>
   </div>
   <div id="holdBox" hidden></div>
+  <div id="todayPanel" hidden><div class="sheet" id="todaySheet"></div></div>
   <div id="holdAlert" hidden></div>
 
   <div id="camBox">
@@ -471,24 +490,64 @@ function holdHit(code) {
   const k = normT(code); if (k.length < 6) return null;
   return holdItems.find(h => { const t = normT(h.track); return t && (t === k || (t.length >= 8 && (k.indexOf(t) >= 0 || t.indexOf(k) >= 0))); }) || null;
 }
-function loadHold() {
-  if (!IN_GAS && !API_URL) return;
-  callApi('hold', {}).then(r => { holdItems = r.items || []; renderHold(); }).catch(() => {});
+/* 🔔 กระดิ่ง: สรุปวันนี้ (ยกเลิก-ห้ามส่ง + แพคไปกี่กล่อง) */
+var todayData = null, todayBusy = false;
+function loadHold(fresh) {
+  if (!IN_GAS && !API_URL) return Promise.resolve();
+  if (todayBusy) return Promise.resolve();
+  todayBusy = true;
+  if (fresh) renderToday('⏳ กำลังดึงข้อมูลล่าสุดจาก Lazada… (ประมาณ 20–60 วินาที)');
+  return callApi(fresh ? 'todayRefresh' : 'today', {}).then(r => {
+    todayBusy = false;
+    todayData = r; holdItems = r.hold || []; renderHold(); renderToday(r.refreshError ? '⚠️ อัปเดตจาก Lazada ไม่สำเร็จ: ' + r.refreshError : (fresh ? '✅ อัปเดตแล้ว' : ''));
+  }).catch(e => { todayBusy = false; renderToday('❌ โหลดไม่สำเร็จ: ' + (e.message || e)); });
 }
 function holdDone(track, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-  return callApi('holdDone', { track, by: S.staff || '' }).then(r => { holdItems = r.items || []; renderHold(); })
+  return callApi('holdDone', { track, by: S.staff || '' }).then(r => { holdItems = r.items || []; if (todayData) todayData.hold = holdItems.map(h => Object.assign(h, { packedToday: (todayData.hold.find(x => x.track === h.track) || {}).packedToday })); renderHold(); renderToday(''); })
     .catch(e => { if (btn) { btn.disabled = false; btn.textContent = '✓ เอาออกแล้ว'; } alert('❌ ' + (e.message || e)); });
 }
-function renderHold() {
-  const b = $('holdBox');
-  if (mode !== 'pack' || !holdItems.length) { b.hidden = true; return; }
-  b.hidden = false;
-  b.innerHTML = '<b>⛔ ยกเลิกแล้ว – เอาออกก่อนส่ง (' + holdItems.length + ' กล่อง)</b>' + holdItems.map((h, i) =>
-    '<div class="hi"><span class="trk">📦 ' + esc(h.track) + '</span><br>' + esc(h.src + ' ' + h.order) + (h.items ? ' · ' + esc(h.items) : '') +
-    (h.reason ? '<br><small>เหตุผล: ' + esc(h.reason) + '</small>' : '') + '<br><button data-i="' + i + '">✓ เอาออกแล้ว</button></div>').join('');
-  b.querySelectorAll('button[data-i]').forEach(x => x.onclick = () => holdDone(holdItems[+x.dataset.i].track, x));
+function renderHold() {                                   // ป้ายตัวเลขบนกระดิ่ง (มีกล่องยกเลิก = กระดิ่งสั่นสีแดง)
+  const n = (holdItems || []).length, el = $('bellN'), btn = $('bellBtn');
+  el.hidden = !n; el.textContent = n;
+  btn.classList.toggle('alarm', !!n);
+  btn.textContent = '🔔'; btn.appendChild(el);
+  $('holdBox').hidden = true;
 }
+function renderToday(msg) {
+  const P = $('todayPanel'); if (P.hidden) return;
+  const r = todayData, th = d => { const p = String(d || '').split('-'); return p.length === 3 ? +p[2] + '/' + +p[1] + '/' + (+p[0] + 543) : d; };
+  let h = '<div class="row2"><b style="font-size:18px">🔔 วันนี้ ' + (r ? th(r.today) : '') + '</b><button id="tdClose">✕</button></div>';
+  h += '<div class="row2" style="margin-top:8px"><span class="mut">' + (msg ? esc(msg) : r && r.updatedAt ? 'ข้อมูล Lazada ล่าสุด ' + esc(r.updatedAt.slice(11, 16)) + ' น. (อัปเดตเองทุกชั่วโมง)' : '') + '</span>' +
+    '<button class="pri" id="tdRefresh"' + (todayBusy ? ' disabled' : '') + '>🔄 อัปเดตทันที</button></div>';
+  if (!r) { $('todaySheet').innerHTML = h + '<p class="mut">กำลังโหลด…</p>'; bindToday(); return; }
+  h += '<h3>' + (r.hold.length ? '<span class="bad">⛔ ลูกค้ายกเลิก – อย่าจัดส่ง ' + r.hold.length + ' กล่อง</span>' : '<span class="ok">✅ ไม่มีกล่องที่ถูกยกเลิก</span>') + '</h3>';
+  r.hold.forEach((x, i) => {
+    h += '<div style="background:#3a1114;border:1px solid #e5484d;border-radius:12px;padding:10px;margin:6px 0">' +
+      '<b style="font-size:17px">📦 ' + esc(x.track) + '</b>' + (x.packedToday ? ' <span class="bad">• แพคไปแล้ววันนี้ – เอาออกจากกองส่ง</span>' : '') +
+      '<br>' + esc(x.src + ' ' + x.order) + (x.items ? '<br>' + esc(x.items) : '') + (x.reason ? '<br><span class="mut">เหตุผล: ' + esc(x.reason) + '</span>' : '') +
+      '<br><button data-h="' + i + '" style="margin-top:6px;background:#e5484d">✓ เอาออกแล้ว</button></div>';
+  });
+  const L = r.lazada, sp = r.shopee, o = r.other;
+  const lzOk = L.notPackedCount === 0;
+  h += '<h3>📦 แพควันนี้ ' + r.total + ' กล่อง</h3><div class="stat">' +
+    '<div>Lazada<b>' + L.packed + '</b><span class="' + (lzOk ? 'ok' : 'bad') + '">' + (lzOk ? '✅ ครบตามที่ต้องส่ง' : '⚠️ ยังไม่แพค ' + L.notPackedCount) + '</span></div>' +
+    '<div>Shopee<b>' + sp.packed + '</b><span class="mut">เทียบยอดสั่งยังไม่ได้</span></div>' +
+    (o.packed ? '<div>ไม่ทราบช่องทาง<b>' + o.packed + '</b><span class="mut">Flash/อื่น ๆ</span></div>' : '') +
+    (r.noBarcode ? '<div>ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b></div>' : '') + '</div>';
+  if (L.notPackedCount) h += '<details open><summary>Lazada รอส่งแต่ยังไม่ได้แพค (' + L.notPackedCount + ')</summary><ul>' +
+    L.notPacked.map(x => '<li>' + esc(x.track) + ' <span class="mut">ออเดอร์ ' + esc(x.order) + '</span></li>').join('') + '</ul></details>';
+  if (o.packed) h += '<details><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary><ul>' + o.list.map(x => '<li>' + esc(x.track) + '</li>').join('') + '</ul></details>';
+  h += '<p class="mut" style="margin-top:10px">• Lazada: เทียบกับออเดอร์ที่สถานะ "รอส่ง" ใน Lazada ณ รอบดึงล่าสุด · Shopee: ยังไม่มีข้อมูลออเดอร์ที่ต้องส่งแบบสด จึงแสดงเฉพาะจำนวนที่แพค (แยกจากรูปแบบเลขพัสดุ SPX)<br>• นับ 1 กล่องต่อ 1 บาร์โค้ด (ถ่ายซ้ำไม่นับเพิ่ม)</p>';
+  $('todaySheet').innerHTML = h; bindToday();
+}
+function bindToday() {
+  $('tdClose').onclick = () => { $('todayPanel').hidden = true; };
+  $('tdRefresh').onclick = () => loadHold(true);
+  $('todaySheet').querySelectorAll('button[data-h]').forEach(x => x.onclick = () => holdDone(todayData.hold[+x.dataset.h].track, x));
+}
+$('bellBtn').onclick = () => { $('todayPanel').hidden = false; renderToday(''); loadHold(false); };
+$('todayPanel').onclick = e => { if (e.target.id === 'todayPanel') $('todayPanel').hidden = true; };
 function showHoldAlert(h) {
   const a = $('holdAlert');
   a.innerHTML = '<div class="big">⛔ ห้ามส่ง!<br>ออเดอร์นี้ถูกยกเลิกแล้ว</div><div class="trk">' + esc(h.track) + '</div>' +
@@ -1557,7 +1616,8 @@ window.addEventListener('beforeunload', e => {
 const GAS_FN = { upload: 'uploadPhoto', search: 'searchRecords', delete: 'deleteRecord', ping: 'pingServer', image: 'getImage',
                  rlookup: 'returnLookup', receive: 'returnReceive', rpending: 'returnPending',
                  shopeeShops: 'shopeeShops', shopeeUpload: 'shopeeUpload', shopeeRequest: 'shopeeRequest',
-                 rdone: 'returnReceived', rimage: 'returnImage', rmatch: 'returnMatchOrder', hold: 'cancelHold', holdDone: 'cancelHoldDone' };
+                 rdone: 'returnReceived', rimage: 'returnImage', rmatch: 'returnMatchOrder', hold: 'cancelHold', holdDone: 'cancelHoldDone',
+                 today: 'todaySummary', todayRefresh: 'todayRefresh' };
 
 function callApi(action, payload) {
   if (IN_GAS) {
