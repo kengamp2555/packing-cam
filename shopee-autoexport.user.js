@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.7
+// @version      3.8
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -9,6 +9,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_listValues
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @connect      script.google.com
@@ -69,9 +70,10 @@
   GM_registerMenuCommand('⚙️ ตั้งค่าลิงก์/รหัส Packing Cam', () => settings(true));
   GM_registerMenuCommand('💰 ดึงรายรับใหม่ตั้งแต่ต้น (ย้อนหลัง ' + INCOME_BACKFILL_MONTHS + ' เดือน)', () => {
     if (!myShop) return alert('เปิดหน้า "รายรับของฉัน" ก่อน แล้วลองใหม่');
-    GM_setValue('incTo_' + myShop.toLowerCase(), ''); GM_setValue('ordTo_' + myShop.toLowerCase(), ''); GM_setValue('incOk_' + myShop.toLowerCase(), 0); alert('ล้างแล้ว – รีเฟรชหน้ารายรับของฉัน');
+    const k = myShop.toLowerCase();
+    loadShared().then(() => Promise.all([sset('incTo_' + k, ''), sset('ordTo_' + k, ''), sset('incOk_' + k, 0)])).then(() => alert('ล้างแล้ว (ทุกเครื่อง) – รีเฟรชหน้ารายรับของฉัน'));
   });
-  GM_registerMenuCommand('🏪 ล้างการจับคู่ชื่อร้าน', () => { GM_setValue('shopMap', '{}'); myShop = ''; alert('ล้างแล้ว – รีเฟรชหน้า'); });
+  GM_registerMenuCommand('🏪 ล้างการจับคู่ชื่อร้าน', () => { loadShared().then(() => sset('shopMap', '{}')).then(() => { myShop = ''; alert('ล้างแล้ว (ทุกเครื่อง) – รีเฟรชหน้า'); }); });
 
   /* ---------------- เรียก Packing Cam (ข้าม CSP ของหน้า Shopee ด้วย GM_xmlhttpRequest) ---------------- */
   function api(action, payload, quiet) {
@@ -101,6 +103,52 @@
         catch (e) { if (!e.retry || a >= 3) throw e; console.warn('[Packing Cam] ลองใหม่ ' + a, e.message); await sleep(4000 * a); }
       }
     })();
+  }
+
+  /* ---------------- 🔄 สถานะกลาง: ความคืบหน้าเก็บที่ Packing Cam → ทุกเครื่องเห็นตรงกัน ----------------
+   * ค่าที่ใช้ร่วมกัน: incTo_/ordTo_/incOk_/lastOk_<ร้าน>, lnwTo, lnwOk, lzPdfOk, shopMap
+   * ลิงก์/รหัส Packing Cam ยังเก็บในเครื่อง (กรอกครั้งแรกครั้งเดียวต่อเครื่อง)
+   */
+  const SHARED_RE = /^(incTo_|ordTo_|incOk_|lastOk_|lnwTo$|lnwOk$|lzPdfOk$|shopMap$)/;
+  let shared = null;                                           // null = ใช้ค่าในเครื่อง (Packing Cam ยังไม่อัปเดต/ต่อไม่ได้)
+  const MID = GM_getValue('machineId', '') || (() => { const v = Math.random().toString(36).slice(2, 10); GM_setValue('machineId', v); return v; })();
+  const HOST = (navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || 'คอม') + '-' + MID.slice(0, 4);
+  async function loadShared() {
+    try {
+      const r = await api('tmGet', {}, true);
+      if (!r.state || typeof r.state !== 'object') throw new Error('Packing Cam ยังไม่รองรับ');
+      shared = r.state;
+      if (!GM_getValue('sharedMigrated', 0)) {                 // ครั้งแรกของเครื่องนี้: ส่งความคืบหน้าเดิมในเครื่องขึ้นไปรวม
+        const up = {};
+        GM_listValues().filter(k => SHARED_RE.test(k)).forEach(k => {
+          const v = GM_getValue(k), cur = shared[k];
+          if (k === 'shopMap') { const m = Object.assign(JSON.parse(v || '{}'), JSON.parse(cur || '{}')); up[k] = JSON.stringify(m); }
+          else if (v && (cur == null || cur === '' || (typeof v === 'number' ? v > +cur : String(v) > String(cur)))) up[k] = v;
+        });
+        if (Object.keys(up).length) shared = (await api('tmSet', { values: up }, true)).state || Object.assign(shared, up);
+        GM_setValue('sharedMigrated', 1);
+      }
+    } catch (e) { console.warn('[Packing Cam] ใช้ค่าในเครื่องแทนสถานะกลาง:', e.message); shared = null; }
+    return shared;
+  }
+  const sget = (k, def) => shared ? (shared[k] == null ? def : shared[k]) : GM_getValue(k, def);
+  async function sset(k, v) {
+    GM_setValue(k, v);
+    if (!shared) return;
+    shared[k] = v;
+    try { await api('tmSet', { values: { [k]: v } }, true); } catch (e) { console.warn('[Packing Cam] บันทึกสถานะกลางไม่ได้', e.message); }
+  }
+  /** ทำงาน name ได้ทีละเครื่อง · เครื่องอื่นกำลังทำอยู่ → คืนค่า false (ข้ามรอบนี้) · ต่ออายุทุก 3 นาทีระหว่างทำงาน */
+  async function withLock(name, st, fn) {
+    let r;
+    try { r = await api('tmLock', { name, owner: MID, host: HOST, ttlMin: 10 }, true); } catch (e) { r = { got: true, off: true }; }   // Packing Cam เก่า → ทำงานแบบเดิม
+    if (r.got === false) {
+      st('⏸️ เครื่องอื่น (' + (r.host || '?') + ') กำลังดึงอยู่ ตั้งแต่ ' + new Date(r.since).toTimeString().slice(0, 5) + ' – เครื่องนี้ข้ามรอบนี้');
+      return false;
+    }
+    const hb = r.off ? 0 : setInterval(() => api('tmLock', { name, owner: MID, host: HOST, ttlMin: 10 }, true).catch(() => {}), 180000);
+    try { await loadShared(); return await fn(); }            // อ่านความคืบหน้าล่าสุดหลังได้สิทธิ์ (เผื่อเครื่องอื่นเพิ่งทำเสร็จ)
+    finally { if (hb) clearInterval(hb); if (!r.off) api('tmUnlock', { name, owner: MID }, true).catch(() => {}); }
   }
 
   /* ---------------- API ของ Seller Centre (ใช้การล็อกอินของคุณเอง) ---------------- */
@@ -135,7 +183,8 @@
 
   /* ---------------- เลือกร้าน (ชื่อบัญชี Shopee ↔ โฟลเดอร์ร้านใน Drive) ---------------- */
   async function shopOf(account, askIfUnknown) {
-    const map = JSON.parse(GM_getValue('shopMap', '{}') || '{}');
+    if (!shared) await loadShared();
+    const map = JSON.parse(sget('shopMap', '{}') || '{}');
     if (map[account]) return map[account];
     const shops = ((await api('shopeeShops', {}, !askIfUnknown)).shops || []).map(s => s.name);
     let shop = shops.find(s => s.toLowerCase() === String(account).toLowerCase());
@@ -145,7 +194,7 @@
       if (!ans || shops.indexOf(ans.trim()) < 0) throw new Error('ไม่ได้เลือกร้าน');
       shop = ans.trim();
     }
-    map[account] = shop; GM_setValue('shopMap', JSON.stringify(map));
+    map[account] = shop; await sset('shopMap', JSON.stringify(map));
     return shop;
   }
 
@@ -267,7 +316,7 @@
       const impTxt = !imp ? '' : imp.error ? ' • นำเข้าไม่สำเร็จ: ' + imp.error
         : imp.skipped ? ' • นำเข้าภายใน ~10 นาที'
         : ' • นำเข้าแล้ว (ใหม่ ' + (imp.fresh || 0) + ' รายการ)';
-      GM_setValue('lastOk_' + shop.toLowerCase(), Date.now());
+      await sset('lastOk_' + shop.toLowerCase(), Date.now());
       await api('shopeeState', { shop, state: 'done', msg: 'ส่ง ' + n + ' ไฟล์ เวลา ' + t + impTxt }, true).catch(() => {});
       st('✅ [' + shop + '] ส่ง ' + n + ' ไฟล์ เวลา ' + t + impTxt);
     } catch (e) {
@@ -366,7 +415,7 @@
   }
   /** ดึง Order.all ทีละเดือน: ครั้งแรกย้อนหลัง INCOME_BACKFILL_MONTHS เดือน · ครั้งต่อไปทับย้อนหลัง ORDER_OVERLAP_DAYS วัน */
   async function syncOrders(shop, k, st) {
-    const today = ymd(new Date()), lastTo = GM_getValue('ordTo_' + k, '');
+    const today = ymd(new Date()), lastTo = sget('ordTo_' + k, '');
     let from;
     if (lastTo) from = addDays(lastTo, -ORDER_OVERLAP_DAYS);
     else { const d = new Date(); d.setMonth(d.getMonth() - INCOME_BACKFILL_MONTHS + 1, 1); from = ymd(d); }
@@ -390,7 +439,7 @@
         fails.push(a.slice(0, 7) + ': ' + e.message);
         if (!firstFail) firstFail = a;
       }
-      if (!firstFail) GM_setValue('ordTo_' + k, b < today ? b : today);   // บันทึกความคืบหน้าถึงก่อนเดือนที่พัง
+      if (!firstFail) await sset('ordTo_' + k, b < today ? b : today);   // บันทึกความคืบหน้าถึงก่อนเดือนที่พัง
       await sleep(3000);
     }
     if (fails.length) throw new Error('สำเร็จ ' + n + ' เดือน · ไม่สำเร็จ ' + fails.length + ' เดือน (รอบหน้าลองใหม่) – ' + fails[0]);
@@ -457,7 +506,8 @@
         if (i > 120) throw new Error('ยังเข้าหน้าการเงินไม่ได้ – ใส่รหัสผ่านแล้วรีเฟรชหน้า');
         st('[' + shop + '] รอใส่รหัสผ่านของ Shopee…'); await sleep(5000);
       }
-      const today = ymd(new Date()), lastTo = GM_getValue('incTo_' + k, ''), lastOk = +GM_getValue('incOk_' + k, 0);
+      await withLock('shopee|' + k, st, async () => {
+      const today = ymd(new Date()), lastTo = sget('incTo_' + k, ''), lastOk = +sget('incOk_' + k, 0);
       if (!force && lastTo === today && Date.now() - lastOk < INCOME_SKIP_HOURS * 3600e3) {
         st('🟢 [' + shop + '] ดึงรายรับไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อดึงอีกครั้ง');
         return;
@@ -492,9 +542,9 @@
         });
         if (res.imported) imp = res.imported;
         n++;
-        GM_setValue('incTo_' + k, b < today ? b : today);   // บันทึกทีละไฟล์ → หยุดกลางทางก็ทำต่อได้
+        await sset('incTo_' + k, b < today ? b : today);   // บันทึกทีละไฟล์ → หยุดกลางทางก็ทำต่อได้ (เครื่องอื่นทำต่อได้ด้วย)
       }
-      GM_setValue('incOk_' + k, Date.now());
+      await sset('incOk_' + k, Date.now());
       const t = new Date().toTimeString().slice(0, 5);
       const fin = imp && imp.fin && imp.fin[0];
       const impTxt = chunks.length > 1 ? ' • ระบบจะนำเข้าเข้า FIN_ ภายใน ~10 นาที'
@@ -502,6 +552,7 @@
         : imp.skipped ? ' • นำเข้าภายใน ~10 นาที'
         : fin ? ' • นำเข้าแล้ว ' + fin.orders + ' ออเดอร์ ' + (fin.ok ? '✓ ตรงกับหน้าสรุป' : '⚠️ ยอดไม่ตรง ดูแจ้งเตือน') : ' • นำเข้าแล้ว';
       st('✅ [' + shop + '] รายรับ ' + n + ' ไฟล์ · คำสั่งซื้อ ' + (ordErr ? '❌ ' + ordErr : ordN + ' ไฟล์') + ' · PDF ' + (pdfErr ? '❌ ' + pdfErr : pdfN + ' เดือน') + ' (' + chunks[0][0] + ' → ' + today + ') เวลา ' + t + impTxt);
+      });
     } catch (e) {
       st('❌ ' + e.message);
       console.warn('[Packing Cam รายรับ]', e);
@@ -548,7 +599,8 @@
     btn.disabled = true;
     try {
       if (!settings(false)) throw new Error('ยังไม่ได้ตั้งค่า');
-      const today = ymd(new Date()), lastTo = GM_getValue('lnwTo', ''), lastOk = +GM_getValue('lnwOk', 0);
+      await withLock('lnwshop', st, async () => {
+      const today = ymd(new Date()), lastTo = sget('lnwTo', ''), lastOk = +sget('lnwOk', 0);
       if (!force && lastTo === today && Date.now() - lastOk < INCOME_SKIP_HOURS * 3600e3) {
         st('🟢 LnwShop ดึงไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อดึงอีกครั้ง'); return;
       }
@@ -566,12 +618,13 @@
           await api('shopeeUpload', { shop: LNW_FOLDER, name: 'order_statement_' + f.from.replace(/-/g, '') + '_' + f.to.replace(/-/g, '') + '.xlsx',
             data: await blobToBase64(f.blob), importNow: chunks.length === 1 });
         }
-        GM_setValue('lnwTo', b);                                // บันทึกทีละช่วง → หยุดกลางทางก็ทำต่อได้
+        await sset('lnwTo', b);                                 // บันทึกทีละช่วง → หยุดกลางทางก็ทำต่อได้
         n++;
         await sleep(1500);
       }
-      GM_setValue('lnwOk', Date.now());
+      await sset('lnwOk', Date.now());
       st('✅ LnwShop ส่ง ' + n + ' ช่วง (' + from + ' → ' + today + ') เวลา ' + new Date().toTimeString().slice(0, 5) + ' • ระบบนำเข้าเข้า FIN_ ภายใน ~10–30 นาที');
+      });
     } catch (e) {
       st('❌ ' + e.message + (/ไม่พบโฟลเดอร์ร้าน/.test(e.message) ? ' – รอระบบสร้างโฟลเดอร์ LnwShop (~10 นาทีหลังติดตั้ง lnwshop.gs) แล้วลองใหม่' : ''));
       console.warn('[Packing Cam LnwShop]', e);
@@ -616,7 +669,8 @@
     btn.disabled = true;
     try {
       if (!settings(false)) throw new Error('ยังไม่ได้ตั้งค่า');
-      const lastOk = +GM_getValue('lzPdfOk', 0);
+      await withLock('lazada', st, async () => {
+      const lastOk = +sget('lzPdfOk', 0);
       if (!force && Date.now() - lastOk < INCOME_SKIP_HOURS * 3600e3) {
         st('🟢 Lazada PDF ตรวจไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อตรวจอีกครั้ง'); return;
       }
@@ -635,9 +689,10 @@
         } catch (e) { fails.push(m + ': ' + e.message); console.warn('[Packing Cam Lazada PDF]', e); }
         await sleep(2000);
       }
-      GM_setValue('lzPdfOk', Date.now());
+      await sset('lzPdfOk', Date.now());
       st((fails.length ? '⚠️' : '✅') + ' Lazada PDF ใหม่ ' + n + ' เดือน' + (todo.length ? '' : ' (มีครบแล้ว)') + (fails.length ? ' · ไม่สำเร็จ ' + fails.length + ' – ' + fails[0] : '') +
         ' เวลา ' + new Date().toTimeString().slice(0, 5));
+      });
     } catch (e) {
       st('❌ ' + e.message); console.warn('[Packing Cam Lazada]', e);
     } finally { lzRunning = false; btn.disabled = false; }
@@ -689,7 +744,7 @@
 
     // เปิดหน้า (เช่น เปิด Chrome) → ดึงเองทันที ถ้ายังไม่ได้ดึงในช่วง AUTO_SKIP_HOURS
     if (AUTO_ON_OPEN && myShop && !linkShop) {
-      const last = +GM_getValue('lastOk_' + myShop.toLowerCase(), 0);
+      const last = +sget('lastOk_' + myShop.toLowerCase(), 0);
       if (Date.now() - last > AUTO_SKIP_HOURS * 3600e3) {
         label.textContent = '⚡ เปิดหน้าแล้ว – ดึงไฟล์ร้าน ' + myShop + ' อัตโนมัติ…';
         await sleep(1500);
