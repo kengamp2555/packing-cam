@@ -518,7 +518,7 @@ function renderHold() {                                   // ป้ายตั�
 function renderToday(msg) {
   const P = $('todayPanel'); if (P.hidden) return;
   const r = todayData, th = d => { const p = String(d || '').split('-'); return p.length === 3 ? +p[2] + '/' + +p[1] + '/' + (+p[0] + 543) : d; };
-  let h = '<div class="row2"><b style="font-size:18px">🔔 วันนี้ ' + (r ? th(r.today) : '') + '</b><button id="tdClose">✕</button></div>';
+  let h = '<div class="row2"><b style="font-size:18px">🔔 สถานะส่งของ ' + (r ? th(r.today) : '') + '</b><button id="tdClose">✕</button></div>';
   h += '<div class="row2" style="margin-top:8px"><span class="mut">' + (msg ? esc(msg) : r && r.updatedAt ? 'ข้อมูล Lazada ล่าสุด ' + esc(r.updatedAt.slice(11, 16)) + ' น. (อัปเดตเองทุกชั่วโมง)' : '') + '</span>' +
     '<button class="pri" id="tdRefresh"' + (todayBusy ? ' disabled' : '') + '>🔄 อัปเดตทันที</button></div>' +
     '<div class="mut" style="margin-top:6px;background:#1f2430;border-radius:10px;padding:8px 10px">📌 ก่อนกดอัปเดต (Shopee): เปิดแท็บ <b>seller.shopee.co.th → คำสั่งซื้อ → การคืนเงิน/คืนสินค้า/ยกเลิก</b> ค้างไว้ ร้านละ 1 แท็บ ในโปรไฟล์ Chrome ของร้านนั้น (คอมที่ลง Tampermonkey · ห้ามให้คอมหลับ) · Lazada ไม่ต้องเปิดอะไร</div>';
@@ -531,27 +531,28 @@ function renderToday(msg) {
       '<br><button data-h="' + i + '" style="margin-top:6px;background:#e5484d">✓ เอาออกแล้ว</button></div>';
   });
   const L = r.lazada, sp = r.shopee, o = r.other;
-  const lzOk = L.notPackedCount === 0;
-  h += '<h3>📦 แพควันนี้ ' + r.total + ' กล่อง</h3><div class="stat">' +
-    '<div>Lazada<b>' + L.packed + ' / ' + (L.packed + L.notPackedCount) + '</b><span class="' + (lzOk ? 'ok' : 'bad') + '">' + (lzOk ? '✅ ครบตามที่ต้องส่ง' : '⚠️ ยังไม่แพค ' + L.notPackedCount) + '</span></div>' +
-    (sp.shops && sp.shops.length ? sp.shops.map(x => '<div>Shopee ' + esc(x.shop) + '<b>' + x.packed + (x.expect ? ' / ' + x.expect : '') + '</b>' +
-        (!x.updatedAt ? '<span class="mut">⚪ ยังไม่มีข้อมูล – เปิดแท็บร้านนี้แล้วกด 🔄</span>' :
-          x.missingCount ? '<span class="bad">⚠️ ยังไม่แพค ' + x.missingCount + '</span>' : x.expect ? '<span class="ok">✅ ครบตามที่ต้องส่ง</span>' : '<span class="mut">ไม่มีที่ต้องส่ง</span>') +
-        (x.notArranged ? '<br><span class="bad">🕒 ยังไม่กดจัดส่ง ' + x.notArranged + '</span>' : '') + '</div>').join('')
-      : '<div>Shopee<b>' + sp.packed + '</b><span class="mut">ยังไม่มีข้อมูลที่ต้องจัดส่ง</span></div>') +
-    (o.packed ? '<div>ไม่ทราบช่องทาง<b>' + o.packed + '</b><span class="mut">Flash/อื่น ๆ</span></div>' : '') +
+  const allOk = r.totalExpect > 0 && r.totalPacked === r.totalExpect;
+  h += '<h3>📦 รอส่งมอบให้ขนส่ง – ยิงแพคแล้ว <span class="' + (allOk ? 'ok' : r.totalExpect ? 'bad' : '') + '">' + r.totalPacked + ' / ' + r.totalExpect + '</span> กล่อง</h3><div class="stat">' +
+    '<div>Lazada<b>' + L.packed + ' / ' + L.expect + '</b>' +
+      (L.expect ? (L.notPackedCount ? '<span class="bad">⚠️ ยังไม่ยิง ' + L.notPackedCount + '</span>' : '<span class="ok">✅ ครบ</span>') : '<span class="mut">ไม่มีที่ต้องส่งมอบ</span>') +
+      (L.pending ? '<br><span class="bad">🕒 ที่ต้องบรรจุ ' + L.pending + '</span>' : '') + '</div>' +
+    (sp.shops || []).map(x => '<div>Shopee ' + esc(x.shop) + '<b>' + x.packed + ' / ' + x.expect + '</b>' +
+      (!x.updatedAt ? '<span class="mut">⚪ ยังไม่มีข้อมูล – เปิดแท็บร้านนี้แล้วกด 🔄</span>' :
+        x.expect ? (x.missingCount ? '<span class="bad">⚠️ ยังไม่ยิง ' + x.missingCount + '</span>' : '<span class="ok">✅ ครบ</span>') : '<span class="mut">ไม่มีที่ดำเนินการแล้ว</span>') +
+      (x.notArranged ? '<br><span class="bad">🕒 ยังไม่ดำเนินการ ' + x.notArranged + '</span>' : '') + '</div>').join('') +
+    (o.packed ? '<div>ไม่ทราบช่องทาง<b>' + o.packed + '</b><span class="mut">ยิงวันนี้ · Flash/อื่น ๆ</span></div>' : '') +
     (r.noBarcode ? '<div id="tdNoBc" style="cursor:pointer;border:1px solid #3b6cf6">ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b><span style="color:#8ab4ff">แตะเพื่อดู / ลบ ›</span></div>' : '') + '</div>' +
-    (r.noBarcode ? '<p class="mut" style="margin:4px 0">“ไม่มีบาร์โค้ด” = รูปที่กดถ่ายแล้วกล้องอ่านบาร์โค้ดไม่ได้ (บันทึกเป็น NO-BARCODE) · ถ้าเป็นกล่องจริงให้ถ่ายใหม่ให้เห็นบาร์โค้ด · ถ้าถ่ายพลาดลบได้</p>' : '');
-  if (L.notPackedCount) h += '<details open><summary>Lazada รอส่งแต่ยังไม่ได้แพค (' + L.notPackedCount + ')</summary><ul>' +
+    (r.noBarcode ? '<p class="mut" style="margin:4px 0">“ไม่มีบาร์โค้ด” = รูปที่ถ่ายวันนี้แต่กล้องอ่านบาร์โค้ดไม่ได้ (บันทึกเป็น NO-BARCODE) · ถ้าเป็นกล่องจริงให้ถ่ายใหม่ให้เห็นบาร์โค้ด · ถ้าถ่ายพลาดลบได้</p>' : '');
+  if (L.notPackedCount) h += '<details open><summary>Lazada ที่ต้องส่งมอบ แต่ยังไม่ยิงแพค (' + L.notPackedCount + ')</summary><ul>' +
     L.notPacked.map(x => '<li>' + esc(x.track) + ' <span class="mut">ออเดอร์ ' + esc(x.order) + '</span></li>').join('') + '</ul></details>';
   (sp.shops || []).forEach(x => {
-    if (x.missingCount) h += '<details open><summary>Shopee ' + esc(x.shop) + ' กดจัดส่งแล้วแต่ยังไม่ได้แพค (' + x.missingCount + ')</summary><ul>' +
+    if (x.missingCount) h += '<details open><summary>Shopee ' + esc(x.shop) + ' ดำเนินการแล้ว แต่ยังไม่ยิงแพค (' + x.missingCount + ')</summary><ul>' +
       x.missing.map(m => '<li>' + esc(m.track) + ' <span class="mut">' + esc(m.order) + (m.items ? ' · ' + esc(m.items) : '') + '</span></li>').join('') + '</ul></details>';
-    if (x.notArranged) h += '<p class="bad" style="margin:4px 0">🕒 Shopee ' + esc(x.shop) + ': ยังไม่กดจัดส่ง ' + x.notArranged + ' ออเดอร์' + (x.shipBy ? ' (ต้องส่งภายใน ' + esc(x.shipBy.slice(5, 16)) + ')' : '') + '</p>';
-    h += '<p class="mut" style="margin:2px 0">Shopee ' + esc(x.shop) + ': ข้อมูลล่าสุด ' + esc(String(x.updatedAt).slice(11, 16) || '-') + ' น. · ' + (x.tabOnline ? '🟢 แท็บ Mac เปิดอยู่' : '⚪ แท็บ Mac ไม่ได้เปิด – กด 🔄 แล้ว Shopee จะไม่อัปเดต') + '</p>';
+    if (x.notArranged) h += '<p class="bad" style="margin:4px 0">🕒 Shopee ' + esc(x.shop) + ': ยังไม่ดำเนินการ (ยังไม่กดจัดส่ง) ' + x.notArranged + ' ออเดอร์' + (x.shipBy ? ' · ต้องส่งภายใน ' + esc(x.shipBy.slice(5, 16)) : '') + '</p>';
+    h += '<p class="mut" style="margin:2px 0">Shopee ' + esc(x.shop) + ': ข้อมูลล่าสุด ' + esc(String(x.updatedAt).slice(11, 16) || '-') + ' น. · ' + (x.tabOnline ? '🟢 แท็บเปิดอยู่' : '⚪ แท็บไม่ได้เปิด – กด 🔄 แล้ว Shopee จะไม่อัปเดต') + '</p>';
   });
   if (o.packed) h += '<details><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary><ul>' + o.list.map(x => '<li>' + esc(x.track) + '</li>').join('') + '</ul></details>';
-  h += '<p class="mut" style="margin-top:10px">• Lazada: เทียบกับออเดอร์ที่สถานะ "รอส่ง" ใน Lazada ณ รอบดึงล่าสุด · Shopee: เทียบกับออเดอร์ที่กดจัดส่งแล้ว (มีเลขพัสดุ) จากแท็บ Seller Centre บน Mac – อัปเดตเองทุกชั่วโมง 8:00–14:00 · กด 🔄 แล้ว Shopee ใช้เวลา 1–3 นาที<br>• นับ 1 กล่องต่อ 1 บาร์โค้ด (ถ่ายซ้ำไม่นับเพิ่ม)</p>';
+  h += '<p class="mut" style="margin-top:10px">• ตัวหลัง = กล่องที่พิมพ์/กดจัดส่งแล้ว รอขนส่งมารับ ณ เวลาที่อัปเดตล่าสุด (Shopee “ดำเนินการแล้ว” · Lazada “ที่ต้องส่งมอบให้บริษัทขนส่ง”) · ขนส่งรับไปแล้ว = หายจากรายการ<br>• ตัวหน้า = ในกล่องเหล่านั้น ยิงบาร์โค้ดใน Packing Cam แล้วกี่กล่อง · Lazada อัปเดตเองทุกชั่วโมง · Shopee ทุกชั่วโมง 8:00–14:00 · กด 🔄 เพื่ออัปเดตตอนนี้</p>';
   $('todaySheet').innerHTML = h; bindToday();
 }
 function bindToday() {
