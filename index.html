@@ -41,6 +41,16 @@
   #recvList .wait{color:var(--warn);font-weight:700}
   #recvList .photoBtn{display:inline-block;margin-top:6px;padding:6px 12px;border-radius:8px;background:#1f3a68;color:#fff;font-size:13px;cursor:pointer}
   #recvMsg{color:var(--mut);margin:4px 2px 8px;font-size:14px}
+  #holdBox{background:#3a1114;border:2px solid #e5484d;border-radius:14px;padding:10px 12px;margin:8px 0;color:#ffd6d6;font-size:14px;line-height:1.5}
+  #holdBox .hi{border-top:1px solid #6b2a2e;padding:8px 0 4px}#holdBox .hi:first-of-type{border-top:0}
+  #holdBox .trk{font-weight:700;color:#fff;font-size:16px;letter-spacing:.5px}
+  #holdBox button,#holdAlert button{font:inherit;border:0;border-radius:10px;padding:8px 14px;margin-top:6px;background:#e5484d;color:#fff;font-weight:700;cursor:pointer}
+  #holdAlert{position:fixed;inset:0;z-index:999;background:rgba(120,0,0,.92);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:10px;font-size:18px}
+  #holdAlert[hidden]{display:none}
+  #holdAlert .big{font-size:34px;font-weight:800;line-height:1.3}
+  #holdAlert .trk{font-size:24px;font-weight:700;background:#fff;color:#a00;border-radius:10px;padding:6px 14px}
+  #holdAlert button{font-size:18px;padding:12px 22px;background:#fff;color:#a00}
+  #holdAlert button.alt{background:transparent;color:#fff;border:1px solid #fff}
   /* สีแพลตฟอร์ม: Lazada = ตัวหนังสือฟ้า, Shopee = แถบส้ม */
   .lzTxt{color:#60a5fa;font-weight:800}
   .spBar{display:inline-block;background:#ee4d2d;color:#fff;font-weight:800;padding:0 8px;border-radius:6px}
@@ -181,6 +191,8 @@
     <button id="magBtn">🔎</button>
     <button id="cfg">⚙️</button>
   </div>
+  <div id="holdBox" hidden></div>
+  <div id="holdAlert" hidden></div>
 
   <div id="camBox">
     <video id="video" playsinline muted autoplay></video>
@@ -416,6 +428,7 @@ function setMode(m) {
   $('fileBtn').textContent = m === 'pack' ? '📷 ถ่ายด้วยแอปกล้อง' : '📷 ถ่ายบาร์โค้ดด้วยแอปกล้อง';
   bcInput.value = ''; manual = false; live.hits = 0; lastFind = ''; lastLookup = '';
   setCamOff(m === 'recv');                     // เข้าแท็บรับคืน → ปิดกล้องไว้ก่อน · แท็บอื่นเปิดกล้อง
+  if (typeof renderHold === 'function') renderHold();
 }
 
 /* ปิด/เปิดภาพกล้อง (หยุดภาพไว้ ไม่ปิดสิทธิ์กล้อง → ไม่ถามสิทธิ์ใหม่) */
@@ -449,7 +462,50 @@ function fillTampermonkey() {
     .catch(() => { $('tmVer').textContent = '⚠️ ยังไม่พบไฟล์สคริปต์บน Netlify – อัปโหลดไฟล์ zip ชุดล่าสุด'; });
 }
 
-$('tPack').onclick = () => setMode('pack');
+$('tPack').onclick = () => { setMode('pack'); loadHold(); };
+
+/* ===== ⛔ ยกเลิกก่อนส่ง: กล่องที่พิมพ์ใบปะหน้าแล้วแต่ออเดอร์ถูกยกเลิก (อัปเดตทุกชั่วโมงจาก Lazada) ===== */
+var holdItems = [], holdShownFor = '';
+const normT = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function holdHit(code) {
+  const k = normT(code); if (k.length < 6) return null;
+  return holdItems.find(h => { const t = normT(h.track); return t && (t === k || (t.length >= 8 && (k.indexOf(t) >= 0 || t.indexOf(k) >= 0))); }) || null;
+}
+function loadHold() {
+  if (!IN_GAS && !API_URL) return;
+  callApi('hold', {}).then(r => { holdItems = r.items || []; renderHold(); }).catch(() => {});
+}
+function holdDone(track, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  return callApi('holdDone', { track, by: S.staff || '' }).then(r => { holdItems = r.items || []; renderHold(); })
+    .catch(e => { if (btn) { btn.disabled = false; btn.textContent = '✓ เอาออกแล้ว'; } alert('❌ ' + (e.message || e)); });
+}
+function renderHold() {
+  const b = $('holdBox');
+  if (mode !== 'pack' || !holdItems.length) { b.hidden = true; return; }
+  b.hidden = false;
+  b.innerHTML = '<b>⛔ ยกเลิกแล้ว – เอาออกก่อนส่ง (' + holdItems.length + ' กล่อง)</b>' + holdItems.map((h, i) =>
+    '<div class="hi"><span class="trk">📦 ' + esc(h.track) + '</span><br>' + esc(h.src + ' ' + h.order) + (h.items ? ' · ' + esc(h.items) : '') +
+    (h.reason ? '<br><small>เหตุผล: ' + esc(h.reason) + '</small>' : '') + '<br><button data-i="' + i + '">✓ เอาออกแล้ว</button></div>').join('');
+  b.querySelectorAll('button[data-i]').forEach(x => x.onclick = () => holdDone(holdItems[+x.dataset.i].track, x));
+}
+function showHoldAlert(h) {
+  const a = $('holdAlert');
+  a.innerHTML = '<div class="big">⛔ ห้ามส่ง!<br>ออเดอร์นี้ถูกยกเลิกแล้ว</div><div class="trk">' + esc(h.track) + '</div>' +
+    '<div>' + esc(h.src + ' ' + h.order) + (h.items ? '<br>' + esc(h.items) : '') + '</div>' +
+    '<button id="haDone">✓ เอาออกแล้ว</button><button id="haClose" class="alt">ปิด</button>';
+  a.hidden = false;
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]);
+  const c = audio();
+  if (c) [0, 0.25, 0.5].forEach(d => { const t = c.currentTime + d, o = c.createOscillator(), g = c.createGain();
+    o.type = 'square'; o.frequency.value = 880; g.gain.setValueAtTime(0.25, t); g.gain.setValueAtTime(0.0001, t + 0.18);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.2); });
+  $('haDone').onclick = () => { a.hidden = true; holdDone(h.track); bcInput.value = ''; manual = false; };
+  $('haClose').onclick = () => { a.hidden = true; bcInput.value = ''; manual = false; setTimeout(() => { holdShownFor = ''; }, 5000); };
+}
+setTimeout(loadHold, 2000);
+setInterval(() => { if (!document.hidden) loadHold(); }, 10 * 60 * 1000);   // อัปเดตทุก 10 นาที
+document.addEventListener('visibilitychange', () => { if (!document.hidden && mode === 'pack') loadHold(); });
 let shopsLoaded = false;
 $('tRecv').onclick = () => { setMode('recv'); if (!shopsLoaded) { shopsLoaded = true; loadShops(); } };
 $('tFind').onclick = () => { setMode('find'); doSearch('', true); };   // เปิดแท็บแล้วโชว์รายการล่าสุดทันที
@@ -871,6 +927,10 @@ function onCode(code) {
   live.code = code; live.at = now;
   if (!manual) bcInput.value = code;
   if (mode === 'recv' && !manual && code !== lastLookup) recvLookup(code);   // รับคืน: ตรวจทันทีที่สแกนเจอ
+  if (mode === 'pack') {                         // ⛔ กล่องที่ออเดอร์ถูกยกเลิกแล้ว → เตือน ไม่ถ่าย
+    const h = holdHit(code);
+    if (h) { if (holdShownFor !== h.track) { holdShownFor = h.track; showHoldAlert(h); } return; }
+  }
   if (!$('auto').checked || manual || live.hits < 2) return;
   if (mode === 'pack' && code !== lastShot.code) shoot();
   if (mode === 'find' && code !== lastFind) doSearch(code);
@@ -889,7 +949,7 @@ bcInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDef
 $('clr').onclick = () => { bcInput.value = ''; manual = false; live = { code: '', at: 0, hits: 0 }; lastFind = ''; };
 
 function mainAction() {
-  if (mode === 'pack') shoot();
+  if (mode === 'pack') { const h = holdHit(bcInput.value); if (h) { showHoldAlert(h); return; } shoot(); }
   else if (mode === 'recv') receiveAndShoot();
   else doSearch(bcInput.value.trim());
 }
@@ -1294,14 +1354,24 @@ function renderDone() {
     li.innerHTML =
       '<span class="okBadge">✅ รับแล้ว ' + esc(thFromIso(String(it.date) + (String(it.date).length === 16 ? ':00' : ''))) + '</span>' +
       (it.by ? ' • โดย ' + esc(it.by) : '') +
-      '<br>' + (it.matched ? platHtml(it.src) + (it.kind ? ' • ' + esc(it.kind) : '') : '<span class="wait">❓ ยังไม่พบในรายการตีกลับ (ระบบจะจับคู่ให้เมื่อข้อมูลเข้า)</span>') +
+      '<br>' + (it.matched ? platHtml(it.src) + (it.kind ? ' • ' + esc(it.kind) : '') : '<span class="wait">❓ ยังไม่พบในรายการตีกลับ (ระบบจะจับคู่ให้เมื่อข้อมูลเข้า)</span>') + (it.manual ? ' <span class="wait">• จับคู่เอง</span>' : '') +
       '<br><span class="trk">📦 ' + esc(it.track) + '</span>' +
       (it.order ? '<br>ออเดอร์ ' + esc(it.order) : '') +
       (it.amount ? ' • 💰 ' + Number(it.amount).toLocaleString('th-TH') + ' บาท' : '') +
       (it.items && it.items.length ? itemsHtml(it.items) : '') +
-      (it.photos && it.photos.length ? '<div><span class="photoBtn">🖼 ดูรูปสภาพของ' + (it.photos.length > 1 ? ' (' + it.photos.length + ')' : '') + '</span></div>' : '');
-    const pb = li.querySelector('.photoBtn');
+      (it.photos && it.photos.length ? '<div><span class="photoBtn">🖼 ดูรูปสภาพของ' + (it.photos.length > 1 ? ' (' + it.photos.length + ')' : '') + '</span></div>' : '') +
+      (it.matched ? '' : '<div><span class="photoBtn matchBtn">🔗 จับคู่เองด้วยเลขออเดอร์</span></div>');
+    const pb = li.querySelector('.photoBtn:not(.matchBtn)');
     if (pb) pb.onclick = () => openReturnPhoto(it, 0);
+    const mb = li.querySelector('.matchBtn');
+    if (mb) mb.onclick = () => {
+      const o = prompt('เลขออเดอร์ของกล่อง ' + it.track + '\n(ดูได้จาก Seller Center → ค้นหาด้วยเลขพัสดุ)', '');
+      if (!o || !o.trim()) return;
+      mb.textContent = '⏳ กำลังจับคู่…';
+      callApi('rmatch', { q: it.track, order: o.trim() })
+        .then(r => { $('recvMsg').textContent = '✅ จับคู่กับออเดอร์ ' + r.order + ' (' + r.src + ')'; loadDone(); })
+        .catch(e => { mb.textContent = '🔗 จับคู่เองด้วยเลขออเดอร์'; alert('❌ ' + (e.message || e)); });
+    };
     $('recvList').appendChild(li);
   });
 }
@@ -1487,7 +1557,7 @@ window.addEventListener('beforeunload', e => {
 const GAS_FN = { upload: 'uploadPhoto', search: 'searchRecords', delete: 'deleteRecord', ping: 'pingServer', image: 'getImage',
                  rlookup: 'returnLookup', receive: 'returnReceive', rpending: 'returnPending',
                  shopeeShops: 'shopeeShops', shopeeUpload: 'shopeeUpload', shopeeRequest: 'shopeeRequest',
-                 rdone: 'returnReceived', rimage: 'returnImage' };
+                 rdone: 'returnReceived', rimage: 'returnImage', rmatch: 'returnMatchOrder', hold: 'cancelHold', holdDone: 'cancelHoldDone' };
 
 function callApi(action, payload) {
   if (IN_GAS) {
