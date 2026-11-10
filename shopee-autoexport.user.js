@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.9
+// @version      3.10
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -449,6 +449,13 @@
   }
 
 
+  /** เทียบเวอร์ชัน 3.10 > 3.9 */
+  function verNewer(a, b) {
+    const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; }
+    return false;
+  }
+
   /* ================= 🚚 ที่ต้องจัดส่ง (คำสั่งซื้อเมื่อวาน–วันนี้) → ShopeeToShip (กระดิ่งในแอป Packing Cam) ================= */
   let tsRunning = false;
   async function syncToShip(shop, why) {
@@ -801,6 +808,14 @@
           await run(myShop, 'queue');
         }
         if (!shared) await loadShared();
+        if (r.tmVer && verNewer(r.tmVer, GM_info.script.version) && !running && !tsRunning && !incRunning) {   // มีสคริปต์ใหม่บน GitHub → รีเฟรชแท็บให้โหลดตัวใหม่
+          const last = JSON.parse(GM_getValue('reloadFor', '{}') || '{}');
+          if (last.v !== r.tmVer || Date.now() - last.at > 2 * 3600e3) {              // กันรีเฟรชวน (Tampermonkey อาจยังไม่ได้อัปเดตตัวในเครื่อง)
+            GM_setValue('reloadFor', JSON.stringify({ v: r.tmVer, at: Date.now() }));
+            label.textContent = '🔄 มีสคริปต์เวอร์ชัน ' + r.tmVer + ' – รีเฟรชแท็บ…';
+            await sleep(3000); location.reload(); return;
+          }
+        }
         if (r.toship) await syncToShip(myShop, 'กด 🔄 ในแอป');
         else if (toShipDue(myShop)) await syncToShip(myShop, 'รอบรายชั่วโมง');
       } catch (e) { /* เน็ตหลุดชั่วคราว รอบหน้าค่อยลองใหม่ */ }
