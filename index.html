@@ -520,7 +520,8 @@ function renderToday(msg) {
   const r = todayData, th = d => { const p = String(d || '').split('-'); return p.length === 3 ? +p[2] + '/' + +p[1] + '/' + (+p[0] + 543) : d; };
   let h = '<div class="row2"><b style="font-size:18px">🔔 วันนี้ ' + (r ? th(r.today) : '') + '</b><button id="tdClose">✕</button></div>';
   h += '<div class="row2" style="margin-top:8px"><span class="mut">' + (msg ? esc(msg) : r && r.updatedAt ? 'ข้อมูล Lazada ล่าสุด ' + esc(r.updatedAt.slice(11, 16)) + ' น. (อัปเดตเองทุกชั่วโมง)' : '') + '</span>' +
-    '<button class="pri" id="tdRefresh"' + (todayBusy ? ' disabled' : '') + '>🔄 อัปเดตทันที</button></div>';
+    '<button class="pri" id="tdRefresh"' + (todayBusy ? ' disabled' : '') + '>🔄 อัปเดตทันที</button></div>' +
+    '<div class="mut" style="margin-top:6px;background:#1f2430;border-radius:10px;padding:8px 10px">📌 ก่อนกดอัปเดต (Shopee): เปิดแท็บ <b>seller.shopee.co.th → คำสั่งซื้อ → การคืนเงิน/คืนสินค้า/ยกเลิก</b> ค้างไว้ ร้านละ 1 แท็บ ในโปรไฟล์ Chrome ของร้านนั้น (คอมที่ลง Tampermonkey · ห้ามให้คอมหลับ) · Lazada ไม่ต้องเปิดอะไร</div>';
   if (!r) { $('todaySheet').innerHTML = h + '<p class="mut">กำลังโหลด…</p>'; bindToday(); return; }
   h += '<h3>' + (r.hold.length ? '<span class="bad">⛔ ลูกค้ายกเลิก – อย่าจัดส่ง ' + r.hold.length + ' กล่อง</span>' : '<span class="ok">✅ ไม่มีกล่องที่ถูกยกเลิก</span>') + '</h3>';
   r.hold.forEach((x, i) => {
@@ -534,11 +535,13 @@ function renderToday(msg) {
   h += '<h3>📦 แพควันนี้ ' + r.total + ' กล่อง</h3><div class="stat">' +
     '<div>Lazada<b>' + L.packed + ' / ' + (L.packed + L.notPackedCount) + '</b><span class="' + (lzOk ? 'ok' : 'bad') + '">' + (lzOk ? '✅ ครบตามที่ต้องส่ง' : '⚠️ ยังไม่แพค ' + L.notPackedCount) + '</span></div>' +
     (sp.shops && sp.shops.length ? sp.shops.map(x => '<div>Shopee ' + esc(x.shop) + '<b>' + x.packed + (x.expect ? ' / ' + x.expect : '') + '</b>' +
-        (x.missingCount ? '<span class="bad">⚠️ ยังไม่แพค ' + x.missingCount + '</span>' : x.expect ? '<span class="ok">✅ ครบตามที่ต้องส่ง</span>' : '<span class="mut">ไม่มีที่ต้องส่ง</span>') +
+        (!x.updatedAt ? '<span class="mut">⚪ ยังไม่มีข้อมูล – เปิดแท็บร้านนี้แล้วกด 🔄</span>' :
+          x.missingCount ? '<span class="bad">⚠️ ยังไม่แพค ' + x.missingCount + '</span>' : x.expect ? '<span class="ok">✅ ครบตามที่ต้องส่ง</span>' : '<span class="mut">ไม่มีที่ต้องส่ง</span>') +
         (x.notArranged ? '<br><span class="bad">🕒 ยังไม่กดจัดส่ง ' + x.notArranged + '</span>' : '') + '</div>').join('')
       : '<div>Shopee<b>' + sp.packed + '</b><span class="mut">ยังไม่มีข้อมูลที่ต้องจัดส่ง</span></div>') +
     (o.packed ? '<div>ไม่ทราบช่องทาง<b>' + o.packed + '</b><span class="mut">Flash/อื่น ๆ</span></div>' : '') +
-    (r.noBarcode ? '<div>ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b></div>' : '') + '</div>';
+    (r.noBarcode ? '<div id="tdNoBc" style="cursor:pointer;border:1px solid #3b6cf6">ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b><span style="color:#8ab4ff">แตะเพื่อดู / ลบ ›</span></div>' : '') + '</div>' +
+    (r.noBarcode ? '<p class="mut" style="margin:4px 0">“ไม่มีบาร์โค้ด” = รูปที่กดถ่ายแล้วกล้องอ่านบาร์โค้ดไม่ได้ (บันทึกเป็น NO-BARCODE) · ถ้าเป็นกล่องจริงให้ถ่ายใหม่ให้เห็นบาร์โค้ด · ถ้าถ่ายพลาดลบได้</p>' : '');
   if (L.notPackedCount) h += '<details open><summary>Lazada รอส่งแต่ยังไม่ได้แพค (' + L.notPackedCount + ')</summary><ul>' +
     L.notPacked.map(x => '<li>' + esc(x.track) + ' <span class="mut">ออเดอร์ ' + esc(x.order) + '</span></li>').join('') + '</ul></details>';
   (sp.shops || []).forEach(x => {
@@ -554,6 +557,8 @@ function renderToday(msg) {
 function bindToday() {
   $('tdClose').onclick = () => { $('todayPanel').hidden = true; };
   $('tdRefresh').onclick = () => loadHold(true);
+  const nb = $('tdNoBc');
+  if (nb) nb.onclick = () => { $('todayPanel').hidden = true; setMode('find'); bcInput.value = 'NO-BARCODE'; doSearch('NO-BARCODE'); };
   $('todaySheet').querySelectorAll('button[data-h]').forEach(x => x.onclick = () => holdDone(todayData.hold[+x.dataset.h].track, x));
 }
 $('bellBtn').onclick = () => { $('todayPanel').hidden = false; renderToday(''); loadHold(false); };
