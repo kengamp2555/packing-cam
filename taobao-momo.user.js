@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.1
+// @version      1.2
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://www.momocargo.com/*
@@ -31,7 +31,7 @@
   const W = unsafeWindow;
   const HB_MS = 15000;
   const HOST = location.hostname;
-  const P = { tbTpl: null, tbOrig: null, momoQ: {}, momoT: 0, busy: false, msg: '' };
+  const P = { momoQ: {}, momoT: 0, busy: false, msg: '', tbLast: null, tbSeq: 0, tbLoadedAt: 0 };
   const cfg = () => ({ url: GM_getValue('it_url', ''), token: GM_getValue('it_token', '') });
 
   GM_registerMenuCommand('⚙️ ตั้งค่า Import Tracker', () => {
@@ -113,51 +113,49 @@
   }
   /* ===END parsers=== */
 
-  const isTbList = o => o && /queryboughtlist/i.test(String(o.api || ''));
-  // ห่อ lib.mtop.request ของหน้าเว็บ: จำรูปแบบคำขอที่หน้าเว็บใช้ + เก็บผลที่หน้าเว็บโหลดเอง
-  function hookMtop() {
-    const lib = W.lib, m = lib && lib.mtop;
-    if (!m || !m.request || m.request.__it) return !!(m && m.request);
-    const orig = m.request;
-    const wrapped = function (opt) {
-      const p = orig.apply(this, arguments);
-      try {
-        if (isTbList(opt)) {
-          P.tbTpl = JSON.parse(JSON.stringify(opt));
-          if (!P.busy && p && p.then) p.then(r => { const x = tbParse(r && r.data); if (x.orders.length) post({ action: 'tb', orders: x.orders }).then(j => say('Taobao: บันทึก ' + j.saved + ' ออเดอร์ (หน้านี้)')).catch(e => say(e.message, 1)); }, () => { });
-        }
-      } catch (e) { }
-      return p;
+  /* หน้า 已买到的宝贝 ส่งคำขอ mtop.taobao.order.queryboughtlistv2 เอง (เซ็นคำขอด้วยตัวของมันเอง)
+     → สคริปต์ไม่สร้างคำขอเอง แค่อ่านผลที่หน้าเว็บได้รับ และเวลาดึงจะกดปุ่ม "หน้าถัดไป" ของหน้าเว็บเหมือนคนกด */
+  const TB_DAYS = 30, TB_MAX_PAGES = 6;
+  function tbCapture(text) {
+    let j; try { j = JSON.parse(text); } catch (e) { return; }
+    if (!j || !/SUCCESS/.test(String(j.ret && j.ret[0]))) return;
+    const x = tbParse(j.data); if (!x.orders.length) return;
+    P.tbLast = x; P.tbSeq++;
+    if (!P.busy) post({ action: 'tb', orders: x.orders }).then(r => say('Taobao: บันทึก ' + r.saved + ' ออเดอร์ (หน้านี้)')).catch(e => say(e.message, 1));
+  }
+  function hookTbXhr() {
+    const X = W.XMLHttpRequest && W.XMLHttpRequest.prototype; if (!X || X.__it) return; X.__it = 1;
+    const open = X.open, send = X.send;
+    X.open = function (m, u) { this.__itU = String(u || ''); return open.apply(this, arguments); };
+    X.send = function () {
+      if (/queryboughtlistv2/i.test(this.__itU)) this.addEventListener('load', () => { try { tbCapture(this.responseText); } catch (e) { } });
+      return send.apply(this, arguments);
     };
-    wrapped.__it = 1; m.request = wrapped; P.tbOrig = orig;
-    return true;
   }
-  function tbRequest(page) {
-    const t = P.tbTpl || { api: 'mtop.taobao.order.queryboughtlistV2', v: '1.0', type: 'post', dataType: 'json', ecode: 0,
-      data: { tabCode: 'all', page: 1, OrderType: 'OrderList', appName: 'tborder', appVersion: '3.0', condition: '{"directRouteToTm2Scene":"1"}', __needlessClearProtocol__: true } };
-    const o = JSON.parse(JSON.stringify(t));
-    if (typeof o.data === 'string') { const d = JSON.parse(o.data); d.page = page; o.data = JSON.stringify(d); } else { o.data = Object.assign({}, o.data, { page }); }
-    if (/^get$/i.test(o.type || '')) o.type = 'post';
-    const fn = P.tbOrig || W.lib.mtop.request;
-    return fn.call(W.lib.mtop, o);
-  }
-  const TB_DAYS = 30;
+  const tbReady = () => !!document.querySelector('.ant-pagination') || !!P.tbLast;
+  async function tbWaitNew(seq, ms) { for (let t = 0; t < ms; t += 300) { if (P.tbSeq > seq) return true; await sleep(300); } return false; }
   async function runTaobao() {
     if (P.busy) return;
-    for (let i = 0; i < 60 && !hookMtop(); i++) await sleep(500);
-    if (!W.lib || !W.lib.mtop) return say('ไม่พบ mtop ของ Taobao (ล็อกอินแล้วหรือยัง?)', 1);
-    const days = TB_DAYS, cut = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    const cut = new Date(Date.now() - TB_DAYS * 864e5).toISOString().slice(0, 10);
+    // หน้าเปิดค้างไว้นาน → โหลดหน้าใหม่ก่อน (ได้ข้อมูลล่าสุด) แล้วดึงต่อหลังโหลดเสร็จ
+    const act = document.querySelector('.ant-pagination-item-active'), onFirst = !act || act.textContent.trim() === '1';
+    if (!P.tbLast || !onFirst || Date.now() - P.tbLoadedAt > 3 * 60e3) {
+      GM_setValue('tb_resume', Date.now()); say('Taobao: โหลดหน้าใหม่ก่อนดึง…'); location.reload(); return;
+    }
     P.busy = true; let total = 0;
     try {
-      for (let page = 1; page <= 40; page++) {
-        say('Taobao: กำลังดึงหน้า ' + page + ' (ย้อนหลัง ' + days + ' วัน)…');
-        let r; try { r = await tbRequest(page); } catch (e) { say('Taobao: ดึงไม่ได้ – ' + ((e && e.ret && e.ret[0]) || e), 1); return; }
-        const x = tbParse(r && r.data);
-        if (!x.orders.length) break;
+      for (let page = 1; page <= TB_MAX_PAGES; page++) {
+        const x = P.tbLast;
+        say('Taobao: บันทึกหน้า ' + page + ' (ย้อนหลัง ' + TB_DAYS + ' วัน)…');
         const keep = x.orders.filter(o => !o.created || String(o.created).slice(0, 10) >= cut);
         if (keep.length) total += (await post({ action: 'tb', orders: keep })).saved;
         if (keep.length < x.orders.length) break;
+        const next = document.querySelector('.ant-pagination-next');
+        if (!next || next.classList.contains('ant-pagination-disabled') || next.getAttribute('aria-disabled') === 'true') break;
         await sleep(2000 + Math.random() * 1500);
+        const seq = P.tbSeq;
+        (next.querySelector('button,a') || next).click();
+        if (!(await tbWaitNew(seq, 15000))) throw new Error('กดหน้าถัดไปแล้วไม่มีข้อมูลตอบกลับ (มีหน้ายืนยันตัวตนขึ้นมาหรือเปล่า?)');
       }
       await post({ action: 'tb', orders: [], full: 1 });
       say('Taobao: บันทึกแล้ว ' + total + ' ออเดอร์ · ' + new Date().toLocaleTimeString('th-TH').slice(0, 5));
@@ -220,8 +218,8 @@
   function run() { return /taobao/.test(HOST) ? runTaobao() : runMomo(); }
   function readiness() {
     if (/taobao/.test(HOST)) {
-      if (!(W.lib && W.lib.mtop && W.lib.mtop.request)) return [false, 'หน้ายังโหลดไม่เสร็จ / ยังไม่ล็อกอิน'];
-      return [true, 'พร้อม'];
+      if (/login/.test(location.hostname + location.pathname)) return [false, 'ยังไม่ได้ล็อกอิน Taobao'];
+      return tbReady() ? [true, 'พร้อม'] : [false, 'หน้ายังโหลดไม่เสร็จ / ยังไม่ล็อกอิน'];
     }
     if (!/\/import-order/.test(location.pathname)) return [false, 'ไม่ได้อยู่หน้า รายการนำเข้า'];
     if (!momoTab('ถึงโกดังจีน')) return [false, 'หน้ายังโหลดไม่เสร็จ / ยังไม่ล็อกอิน'];
@@ -231,12 +229,19 @@
     if (!cfg().url || !cfg().token) return say('ยังไม่ได้ตั้งค่า: เมนู Tampermonkey → ⚙️ ตั้งค่า Import Tracker', 1);
     const [ready, why] = readiness();
     try {
-      const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy ? P.msg : (ready ? (P.msg && !/^❌/.test(P.msg) ? P.msg : 'พร้อม') : why), ver: GM_info.script.version });
+      const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy || ready ? (P.msg || 'พร้อม') : why, ver: GM_info.script.version });
       if (r.pull && ready && !P.busy) { say((site() === 'tb' ? 'Taobao' : 'Momo') + ': แอปสั่งดึง – เริ่ม…'); run().then(() => setTimeout(beat, 500)); }
     } catch (e) { /* เน็ตหลุดชั่วคราว: รอบหน้าลองใหม่ */ }
   }
   if (/momocargo/.test(HOST)) hookXhr();
-  else { const iv = setInterval(() => { if (hookMtop()) clearInterval(iv); }, 30); setTimeout(() => clearInterval(iv), 30000); }
+  else {
+    hookTbXhr(); P.tbLoadedAt = Date.now();
+    // เพิ่งโหลดหน้าใหม่เพราะแอปสั่งดึง → ดึงต่อเมื่อข้อมูลหน้าแรกมาถึง
+    if (Date.now() - +GM_getValue('tb_resume', 0) < 2 * 60e3) {
+      GM_setValue('tb_resume', 0);
+      (async () => { for (let i = 0; i < 60 && !P.tbLast; i++) await sleep(500); if (P.tbLast) runTaobao(); else say('Taobao: หน้าไม่โหลดรายการ (ล็อกอินหรือยัง?)', 1); })();
+    }
+  }
   const start = () => { setTimeout(beat, 3000); setInterval(beat, HB_MS); };
   document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', start, { once: true }) : start();
 })();
