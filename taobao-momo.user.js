@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.5
+// @version      1.7
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -165,7 +165,7 @@
   }
 
   /* ======================= Momo Cargo ======================= */
-  const RECENT_DONE_DAYS = 30; // สถานะ "จัดส่งให้แล้ว" มีเป็นพันรายการ → ส่งเฉพาะ PO ที่สร้างใน 30 วัน
+  const RECENT_DONE_DAYS = 45; // สถานะ "จัดส่งให้แล้ว" มีเป็นพันรายการ → ส่งเฉพาะ PO ที่สร้างใน 45 วัน (เผื่อออเดอร์ Taobao 30 วัน ที่เข้าโกดังทีหลัง)
   function momoCapture(url, text) {
     if (!/\/order\/list\/v2\//.test(url)) return;
     let j; try { j = JSON.parse(text); } catch (e) { return; }
@@ -191,6 +191,7 @@
     X.open = function (m, u) { this.__itU = String(u || ''); return open.apply(this, arguments); };
     X.send = function () {
       if (/momocargo\.com.*\/order\/list\/v2\//.test(this.__itU)) this.addEventListener('load', () => { try { momoCapture(this.__itU, this.responseText); } catch (e) { } });
+      else if (/momocargo\.com/.test(this.__itU)) this.addEventListener('load', () => { try { if (P.lfWant && String(this.responseText || '').toUpperCase().indexOf(P.lfWant.toUpperCase()) >= 0) P.lfHit = true; } catch (e) { } });
       return send.apply(this, arguments);
     };
     const f = W.fetch;
@@ -212,7 +213,61 @@
       await sleep(lab === 'จัดส่งให้แล้ว' ? 9000 : 5000);
     }
     await sleep(3500); clearTimeout(P.momoT); await flushMomo(true);
+    await momoLostFound();
     } finally { P.busy = false; }
+  }
+
+  /* ---------- ศูนย์ตามหาสินค้า: ค้นเลขที่ตกหล่น (ร้านปิดรหัส S00*** → Momo ไม่รู้เจ้าของ) ---------- */
+  const visible = e => !!(e && (e.offsetWidth || e.offsetHeight || e.getClientRects().length));
+  // หา element ที่ข้อความตรง (เลือกตัวในสุด เช่น <a> ไม่ใช่ <div> ที่ห่อมันไว้)
+  const byText = (sel, re) => { const c = [...document.querySelectorAll(sel)].filter(e => visible(e) && re.test((e.innerText || e.textContent || '').trim()));
+    return c.find(e => !c.some(o => o !== e && e.contains(o))) || null; };
+  function setInput(el, v) {
+    const set = Object.getOwnPropertyDescriptor(W.HTMLInputElement.prototype, 'value').set;
+    set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function pressEnter(el) {
+    ['keydown', 'keypress', 'keyup'].forEach(t => el.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })));
+    const f = el.closest('form'); if (f) { try { f.requestSubmit ? f.requestSubmit() : f.submit(); } catch (e) { } }
+  }
+  const lfInput = () => [...document.querySelectorAll('input')].filter(visible).find(i => !/taobao|tmall|1688|ลิงก์/i.test(i.placeholder || '') && /^(text|search|)$/.test(i.type || ''));
+  async function momoLostFound() {
+    let list = [];
+    try { list = (await post({ action: 'missing' })).list || []; } catch (e) { return; }
+    if (!list.length) return say('Momo: ดึงเสร็จ · ไม่มีเลขตกหล่นต้องค้น');
+    // ไปหน้า ค้นหา/ตามสินค้า ผ่านเมนูด้านซ้าย (ไม่เดา URL)
+    let link = byText('a,li,span,div', /^ค้นหา\s*\/\s*ตามสินค้า$/);
+    if (!link) { const g = byText('a,li,span,div', /^ศูนย์ตามหาสินค้า$/); if (g) { g.click(); await sleep(800); link = byText('a,li,span,div', /^ค้นหา\s*\/\s*ตามสินค้า$/); } }
+    if (!link) return say('Momo: หาเมนู "ค้นหา/ตามสินค้า" ไม่เจอ – ข้ามการค้นศูนย์ตามหาสินค้า', 1);
+    link.click(); await sleep(3000);
+    const results = [];
+    for (const trk of list) {
+      const inp = lfInput(); if (!inp) { say('Momo: หาช่องค้นหาในศูนย์ตามหาสินค้าไม่เจอ', 1); break; }
+      say('Momo: ค้นศูนย์ตามหาสินค้า ' + trk + ' (' + (results.length + 1) + '/' + list.length + ')…');
+      P.lfHit = false; P.lfWant = trk;
+      setInput(inp, trk); await sleep(300); pressEnter(inp);
+      // รอจนหน้าผลค้นหาแสดงเลขที่ค้น (หัวผลค้นหาจะมีเลขนั้น) · ถ้าไม่ขึ้น ลองกดปุ่มค้นหาข้างช่อง
+      const shown = () => (document.body.innerText || '').indexOf(trk) >= 0;
+      let ok = false; for (let t = 0; t < 20 && !(ok = shown()); t++) await sleep(300);
+      if (!ok) {
+        const box = inp.closest('div,form'), btn = box && [...(box.parentElement || box).querySelectorAll('button,[role=button]')].filter(visible)[0];
+        if (btn) { btn.click(); for (let t = 0; t < 20 && !(ok = shown()); t++) await sleep(300); }
+      }
+      await sleep(1500);
+      const m = (document.body.innerText || '').match(/ผลการค้นหา\s*:?\s*(\d+)/);
+      const n = ok && m ? +m[1] : null;
+      if (n === null) { say('Momo: ค้นในศูนย์ตามหาสินค้าไม่สำเร็จ (หน้าไม่แสดงผล) – ข้าม', 1); break; }
+      results.push({ tracking: trk, found: n > 0 });
+      await sleep(1200 + Math.random() * 800);
+    }
+    P.lfWant = '';
+    if (results.length) {
+      try { await post({ action: 'momolf', results }); } catch (e) { }
+      const f = results.filter(r => r.found).length;
+      say('Momo: ดึงเสร็จ · ค้นศูนย์ตามหาสินค้า ' + results.length + ' เลข' + (f ? ' · 📍 พบ ' + f + ' กล่อง ดูในแอป' : ' · ไม่พบ'));
+    }
+    await sleep(1500);
+    location.href = '/import-order';
   }
 
   /* ---------- หน้า 查看物流 (คุณเปิดเอง): อ่านเลขพัสดุที่หน้าแสดง → ผูกกับเลขออเดอร์ ---------- */
