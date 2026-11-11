@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.0
+// @version      1.1
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://www.momocargo.com/*
@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_info
 // @grant        unsafeWindow
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
@@ -20,15 +21,17 @@
 
 /*
  * ตั้งค่าครั้งแรก (ต่อเครื่อง): เมนู Tampermonkey → "⚙️ ตั้งค่า Import Tracker" → วาง URL /exec และ TOKEN
- * Taobao: เปิดหน้า 已买到的宝贝 ทิ้งไว้ → ดึงย้อนหลังเอง (ครั้งแรก 90 วัน, ต่อไป 30 วัน) ทุก 2 ชม.
- * Momo:   เปิดหน้า รายการนำเข้า (/import-order) → สคริปต์กดแท็บสถานะให้เอง ทุก 2 ชม.
+ * ใช้งาน: ในแอป Import Tracker กดปุ่ม "เปิดหน้า" Taobao / Momo → เมื่อแอปขึ้น "พร้อม" กด "ดึงทันที"
+ *   Taobao: ดึงออเดอร์ย้อนหลัง 30 วัน · Momo: สคริปต์กดแท็บสถานะให้เอง (จัดส่งแล้ว: เฉพาะ PO 30 วัน)
+ * ไม่มีการดึงอัตโนมัติตามเวลา — หน้าเว็บที่เปิดอยู่รายงานสถานะให้แอปทุก 15 วินาทีเท่านั้น
  * ข้อมูลที่ส่ง: เลขออเดอร์ ร้าน สินค้า ราคา เลขพัสดุ สถานะ น้ำหนัก ค่าขนส่ง — ไม่ส่งชื่อ/ที่อยู่/เบอร์โทร และไม่อ่านรหัสผ่าน/โทเคนของเว็บ
  */
 (function () {
   'use strict';
   const W = unsafeWindow;
-  const EVERY_MS = 2 * 3600e3;
+  const HB_MS = 15000;
   const HOST = location.hostname;
+  const P = { tbTpl: null, tbOrig: null, momoQ: {}, momoT: 0, busy: false, msg: '' };
   const cfg = () => ({ url: GM_getValue('it_url', ''), token: GM_getValue('it_token', '') });
 
   GM_registerMenuCommand('⚙️ ตั้งค่า Import Tracker', () => {
@@ -37,7 +40,7 @@
     GM_setValue('it_url', u.trim()); GM_setValue('it_token', t.trim());
     post({ action: 'ping' }).then(() => alert('✅ เชื่อมต่อได้')).catch(e => alert('❌ ' + e.message));
   });
-  GM_registerMenuCommand('🔄 ดึงข้อมูลตอนนี้', () => { GM_setValue('run_' + site(), 0); run(true); });
+  GM_registerMenuCommand('🔄 ดึงข้อมูลตอนนี้', () => run());
 
   /* ---------- ส่งเข้า Apps Script ---------- */
   function post(body) {
@@ -56,31 +59,20 @@
   /* ---------- กล่องสถานะเล็กๆ ---------- */
   let box;
   function say(t, err) {
+    P.msg = (err ? '❌ ' : '') + t;
     if (!document.body) return document.addEventListener('DOMContentLoaded', () => say(t, err), { once: true });
     if (!box) {
       const st = document.createElement('style'); st.textContent = '@media print{#itBox{display:none!important}}'; document.head.appendChild(st);
       box = document.createElement('div'); box.id = 'itBox';
       box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#1f2328;color:#fff;font:13px/1.4 sans-serif;padding:7px 11px;border-radius:8px;max-width:320px;opacity:.92;cursor:pointer';
-      box.title = 'Import Tracker (คลิกเพื่อซ่อน)'; box.onclick = () => box.remove();
+      box.title = 'Import Tracker (คลิกเพื่อซ่อน)'; box.onclick = () => { box.style.display = 'none'; };
       document.body.appendChild(box);
     }
-    box.style.background = err ? '#b42318' : '#1f2328';
+    box.style.display = 'block'; box.style.background = err ? '#b42318' : '#1f2328';
     box.textContent = '📦 ' + t;
   }
 
-  /* ---------- ถึงรอบหรือยัง (ดูจากเซิร์ฟเวอร์ ทุกเครื่องเห็นเหมือนกัน) ---------- */
-  async function due(force) {
-    const k = 'run_' + site(), last = +GM_getValue(k, 0);
-    if (!force && Date.now() - last < 20 * 60e3) return null; // กันหลายแท็บในเครื่องเดียว
-    let st = {}; try { st = (await post({ action: 'state' })).state || {}; } catch (e) { say(e.message, 1); return null; }
-    const ts = st[site() + 'Full'], at = ts ? new Date(ts.replace(' ', 'T')).getTime() : 0;
-    if (!force && at && Date.now() - at < EVERY_MS) return null;
-    GM_setValue(k, Date.now());
-    return { first: !at };
-  }
-
   /* ======================= Taobao ======================= */
-  const P = { tbTpl: null, tbOrig: null, momoQ: {}, momoT: 0 };
   /* ===INLINE parsers.js=== */
   const yuan_ = s => { const m = String(s == null ? '' : s).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/); return m ? +m[0] : 0; };
   function tbParse(d) {
@@ -149,17 +141,17 @@
     const fn = P.tbOrig || W.lib.mtop.request;
     return fn.call(W.lib.mtop, o);
   }
-  async function runTaobao(force) {
+  const TB_DAYS = 30;
+  async function runTaobao() {
+    if (P.busy) return;
     for (let i = 0; i < 60 && !hookMtop(); i++) await sleep(500);
-    if (!W.lib || !W.lib.mtop) return say('ไม่พบ mtop ของ Taobao', 1);
-    const d = await due(force); if (!d) return;
-    await sleep(4000); // รอหน้าเว็บโหลดหน้าแรกก่อน (จะได้รูปแบบคำขอจริง)
-    const days = d.first ? 90 : 30, cut = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    if (!W.lib || !W.lib.mtop) return say('ไม่พบ mtop ของ Taobao (ล็อกอินแล้วหรือยัง?)', 1);
+    const days = TB_DAYS, cut = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
     P.busy = true; let total = 0;
     try {
       for (let page = 1; page <= 40; page++) {
         say('Taobao: กำลังดึงหน้า ' + page + ' (ย้อนหลัง ' + days + ' วัน)…');
-        let r; try { r = await tbRequest(page); } catch (e) { say('Taobao: ดึงไม่ได้ – ' + ((e && e.ret && e.ret[0]) || e), 1); GM_setValue('run_tb', 0); return; }
+        let r; try { r = await tbRequest(page); } catch (e) { say('Taobao: ดึงไม่ได้ – ' + ((e && e.ret && e.ret[0]) || e), 1); return; }
         const x = tbParse(r && r.data);
         if (!x.orders.length) break;
         const keep = x.orders.filter(o => !o.created || String(o.created).slice(0, 10) >= cut);
@@ -169,12 +161,12 @@
       }
       await post({ action: 'tb', orders: [], full: 1 });
       say('Taobao: บันทึกแล้ว ' + total + ' ออเดอร์ · ' + new Date().toLocaleTimeString('th-TH').slice(0, 5));
-    } catch (e) { say('Taobao: ' + e.message, 1); GM_setValue('run_tb', 0); }
+    } catch (e) { say('Taobao: ' + e.message, 1); }
     finally { P.busy = false; }
   }
 
   /* ======================= Momo Cargo ======================= */
-  const RECENT_DONE_DAYS = 60; // สถานะ "จัดส่งให้แล้ว" มีเป็นพันรายการ → ส่งเฉพาะ PO ที่สร้างใน 60 วัน
+  const RECENT_DONE_DAYS = 30; // สถานะ "จัดส่งให้แล้ว" มีเป็นพันรายการ → ส่งเฉพาะ PO ที่สร้างใน 30 วัน
   function momoCapture(url, text) {
     if (!/\/order\/list\/v2\//.test(url)) return;
     let j; try { j = JSON.parse(text); } catch (e) { return; }
@@ -207,33 +199,44 @@
       if (/\/order\/list\/v2\//.test(url)) p.then(r => r.clone().text()).then(t => momoCapture(url, t)).catch(() => { }); return p; };
   }
   const MOMO_TABS = ['รอเข้าโกดังจีน', 'ถึงโกดังจีน', 'กำลังส่งมาไทย', 'รอชำระค่าขนส่ง', 'กำลังนำส่ง', 'จัดส่งให้แล้ว'];
-  async function runMomo(force) {
-    if (!/\/import-order/.test(location.pathname)) return;
-    const d = await due(force); if (!d) return;
-    await sleep(3000);
+  const momoTab = lab => [...document.querySelectorAll('a')].find(e => (e.innerText || '').trim().replace(/\s+/g, ' ').replace(/\s*[\d.,]+K?$/, '') === lab);
+  async function runMomo() {
+    if (P.busy) return;
+    if (!/\/import-order/.test(location.pathname)) return say('Momo: ไปที่หน้า รายการนำเข้า ก่อน', 1);
+    P.busy = true;
+    try {
     for (const lab of MOMO_TABS) {
-      const a = [...document.querySelectorAll('a')].find(e => (e.innerText || '').trim().replace(/\s+/g, ' ').replace(/\s*[\d.,]+K?$/, '') === lab);
+      const a = momoTab(lab);
       if (!a) continue;
       say('Momo: กำลังอ่าน "' + lab + '"…');
       a.click();
       await sleep(lab === 'จัดส่งให้แล้ว' ? 9000 : 5000);
     }
     await sleep(3500); clearTimeout(P.momoT); await flushMomo(true);
+    } finally { P.busy = false; }
   }
 
-  /* ---------- เริ่ม ---------- */
-  function run(force) {
-    if (/taobao/.test(HOST)) runTaobao(force); else runMomo(force);
+  /* ---------- เริ่ม: รายงานสถานะให้แอปทุก 15 วิ · แอปกด "ดึงทันที" → ดึง ---------- */
+  function run() { return /taobao/.test(HOST) ? runTaobao() : runMomo(); }
+  function readiness() {
+    if (/taobao/.test(HOST)) {
+      if (!(W.lib && W.lib.mtop && W.lib.mtop.request)) return [false, 'หน้ายังโหลดไม่เสร็จ / ยังไม่ล็อกอิน'];
+      return [true, 'พร้อม'];
+    }
+    if (!/\/import-order/.test(location.pathname)) return [false, 'ไม่ได้อยู่หน้า รายการนำเข้า'];
+    if (!momoTab('ถึงโกดังจีน')) return [false, 'หน้ายังโหลดไม่เสร็จ / ยังไม่ล็อกอิน'];
+    return [true, 'พร้อม'];
   }
-  if (/momocargo/.test(HOST)) {
-    hookXhr();
-    // แอป Momo เปลี่ยนหน้าแบบ SPA → เช็กทุก 10 นาที
-    const start = () => { run(false); setInterval(() => run(false), 10 * 60e3); };
-    document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', start, { once: true }) : start();
-  } else {
-    const iv = setInterval(() => { if (hookMtop()) clearInterval(iv); }, 30);
-    setTimeout(() => clearInterval(iv), 30000);
-    const start = () => { run(false); setInterval(() => run(false), 15 * 60e3); };
-    document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', start, { once: true }) : start();
+  async function beat() {
+    if (!cfg().url || !cfg().token) return say('ยังไม่ได้ตั้งค่า: เมนู Tampermonkey → ⚙️ ตั้งค่า Import Tracker', 1);
+    const [ready, why] = readiness();
+    try {
+      const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy ? P.msg : (ready ? (P.msg && !/^❌/.test(P.msg) ? P.msg : 'พร้อม') : why), ver: GM_info.script.version });
+      if (r.pull && ready && !P.busy) { say((site() === 'tb' ? 'Taobao' : 'Momo') + ': แอปสั่งดึง – เริ่ม…'); run().then(() => setTimeout(beat, 500)); }
+    } catch (e) { /* เน็ตหลุดชั่วคราว: รอบหน้าลองใหม่ */ }
   }
+  if (/momocargo/.test(HOST)) hookXhr();
+  else { const iv = setInterval(() => { if (hookMtop()) clearInterval(iv); }, 30); setTimeout(() => clearInterval(iv), 30000); }
+  const start = () => { setTimeout(beat, 3000); setInterval(beat, HB_MS); };
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', start, { once: true }) : start();
 })();
