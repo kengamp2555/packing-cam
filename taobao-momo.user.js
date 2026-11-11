@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.2
+// @version      1.3
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://www.momocargo.com/*
@@ -219,6 +219,8 @@
   function readiness() {
     if (/taobao/.test(HOST)) {
       if (/login/.test(location.hostname + location.pathname)) return [false, 'ยังไม่ได้ล็อกอิน Taobao'];
+      if (/route_to=tm1/.test(location.search) || /旧版/.test((document.body && document.body.innerText || '').slice(0, 3000)) && !document.querySelector('.ant-pagination'))
+        return [false, 'เป็นหน้า Taobao แบบเก่า → กดปุ่มส้ม 切换新版 ที่หน้า Taobao ครั้งเดียว'];
       return tbReady() ? [true, 'พร้อม'] : [false, 'หน้ายังโหลดไม่เสร็จ / ยังไม่ล็อกอิน'];
     }
     if (!/\/import-order/.test(location.pathname)) return [false, 'ไม่ได้อยู่หน้า รายการนำเข้า'];
