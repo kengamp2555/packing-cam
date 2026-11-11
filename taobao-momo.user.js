@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.7
+// @version      1.8
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -213,7 +213,9 @@
       await sleep(lab === 'จัดส่งให้แล้ว' ? 9000 : 5000);
     }
     await sleep(3500); clearTimeout(P.momoT); await flushMomo(true);
-    await momoLostFound();
+    const went = await momoLostFound();
+    const went2 = await momoRateFromMenu();
+    if (went || went2) { await sleep(1200); location.href = '/import-order'; }
     } finally { P.busy = false; }
   }
 
@@ -234,11 +236,11 @@
   async function momoLostFound() {
     let list = [];
     try { list = (await post({ action: 'missing' })).list || []; } catch (e) { return; }
-    if (!list.length) return say('Momo: ดึงเสร็จ · ไม่มีเลขตกหล่นต้องค้น');
+    if (!list.length) { say('Momo: ดึงเสร็จ · ไม่มีเลขตกหล่นต้องค้น'); return false; }
     // ไปหน้า ค้นหา/ตามสินค้า ผ่านเมนูด้านซ้าย (ไม่เดา URL)
     let link = byText('a,li,span,div', /^ค้นหา\s*\/\s*ตามสินค้า$/);
     if (!link) { const g = byText('a,li,span,div', /^ศูนย์ตามหาสินค้า$/); if (g) { g.click(); await sleep(800); link = byText('a,li,span,div', /^ค้นหา\s*\/\s*ตามสินค้า$/); } }
-    if (!link) return say('Momo: หาเมนู "ค้นหา/ตามสินค้า" ไม่เจอ – ข้ามการค้นศูนย์ตามหาสินค้า', 1);
+    if (!link) { say('Momo: หาเมนู "ค้นหา/ตามสินค้า" ไม่เจอ – ข้ามการค้นศูนย์ตามหาสินค้า', 1); return false; }
     link.click(); await sleep(3000);
     const results = [];
     for (const trk of list) {
@@ -266,8 +268,31 @@
       const f = results.filter(r => r.found).length;
       say('Momo: ดึงเสร็จ · ค้นศูนย์ตามหาสินค้า ' + results.length + ' เลข' + (f ? ' · 📍 พบ ' + f + ' กล่อง ดูในแอป' : ' · ไม่พบ'));
     }
-    await sleep(1500);
-    location.href = '/import-order';
+    return true;
+  }
+
+  /* ---------- เรทหยวนวันนี้ของ Momo ("เรทเงินหยวนวันนี้: ฿5.22/¥1") ---------- */
+  function readRate() {
+    const t = (document.body && document.body.innerText) || '';
+    const m = t.match(/เรทเงินหยวน(?:วันนี้)?\s*:?[\s\S]{0,60}?฿\s*([\d.]+)\s*\/\s*¥?\s*1\b/);
+    const v = m ? +m[1] : 0; return v > 3 && v < 10 ? v : 0;
+  }
+  async function sendRate(v, src) {
+    const k = new Date().toISOString().slice(0, 10) + ':' + v;
+    if (!v || GM_getValue('rate_sent', '') === k) return;
+    try { await post({ action: 'rate', rate: v, source: src }); GM_setValue('rate_sent', k); } catch (e) { }
+  }
+  // ตอนกดดึงทันที: เปิดหน้า "บริการ Alipay" ผ่านเมนู แล้วอ่านเรท
+  async function momoRateFromMenu() {
+    let v = readRate(); if (v) { await sendRate(v, 'momo-page'); return false; }
+    let link = byText('a,li,span,div', /^บริการ\s*Alipay$/);
+    if (!link) { const g = byText('a,li,span,div', /^(บริการ\s*\/\s*)?ธุรกรรมฝั่งจีน$/); if (g) { g.click(); await sleep(800); link = byText('a,li,span,div', /^บริการ\s*Alipay$/); } }
+    if (!link) { say('Momo: หาเมนู "บริการ Alipay" ไม่เจอ – ไม่ได้อ่านเรทหยวน', 1); return false; }
+    say('Momo: อ่านเรทหยวนวันนี้…'); link.click();
+    for (let t = 0; t < 20 && !(v = readRate()); t++) await sleep(400);
+    if (v) { await sendRate(v, 'momo-alipay'); say('Momo: ดึงเสร็จ · เรทหยวนวันนี้ ฿' + v + '/¥'); }
+    else say('Momo: อ่านเรทหยวนไม่ได้', 1);
+    return true;
   }
 
   /* ---------- หน้า 查看物流 (คุณเปิดเอง): อ่านเลขพัสดุที่หน้าแสดง → ผูกกับเลขออเดอร์ ---------- */
@@ -308,6 +333,7 @@
   async function beat() {
     if (!cfg().url || !cfg().token) return say('ยังไม่ได้ตั้งค่า: เมนู Tampermonkey → ⚙️ ตั้งค่า Import Tracker', 1);
     const [ready, why] = readiness();
+    if (site() === 'momo' && !P.busy) sendRate(readRate(), 'momo-page');
     try {
       const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy || ready ? (P.msg || 'พร้อม') : why, ver: GM_info.script.version });
       if (r.pull && ready && !P.busy) { say((site() === 'tb' ? 'Taobao' : 'Momo') + ': แอปสั่งดึง – เริ่ม…'); run().then(() => setTimeout(beat, 500)); }
