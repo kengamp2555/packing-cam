@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.4
+// @version      1.5
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
+// @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
 // @match        https://www.momocargo.com/*
 // @match        https://momocargo.com/*
 // @grant        GM_xmlhttpRequest
@@ -212,6 +213,28 @@
     }
     await sleep(3500); clearTimeout(P.momoT); await flushMomo(true);
     } finally { P.busy = false; }
+  }
+
+  /* ---------- หน้า 查看物流 (คุณเปิดเอง): อ่านเลขพัสดุที่หน้าแสดง → ผูกกับเลขออเดอร์ ---------- */
+  if (/pc-trade-logistics/.test(location.pathname)) {
+    const orderId = new URLSearchParams(location.search).get('orderId') || '';
+    const readPkgs = () => {
+      const lines = (document.body && document.body.innerText || '').split('\n').map(x => x.trim()).filter(Boolean), out = [];
+      lines.forEach((l, i) => {
+        if (l !== '复制' || i < 1) return;
+        const parts = lines[i - 1].split(/\s+/), no = parts[parts.length - 1];
+        if (/^[A-Z0-9-]{8,}$/i.test(no) && !out.some(p => p.mailNo === no)) out.push({ mailNo: no, cp: parts.length > 1 ? parts.slice(0, -1).join(' ') : (lines[i - 2] || '').slice(0, 20) });
+      });
+      return out;
+    };
+    (async () => {
+      for (let t = 0; t < 40; t++) { await sleep(500); const pk = readPkgs(); if (pk.length) {
+        try { const r = await post({ action: 'tbpkg', orderId, pkgs: pk }); say('Import Tracker: ผูกเลขพัสดุ ' + pk.map(p => p.mailNo).join(', ') + (r.saved ? ' ✅' : ' (มีอยู่แล้ว)')); }
+        catch (e) { say(e.message, 1); }
+        return; } }
+      say('ไม่พบเลขพัสดุในหน้านี้', 1);
+    })();
+    return;
   }
 
   /* ---------- เริ่ม: รายงานสถานะให้แอปทุก 15 วิ · แอปกด "ดึงทันที" → ดึง ---------- */
