@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.8
+// @version      1.9
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -42,6 +42,7 @@
     post({ action: 'ping' }).then(() => alert('✅ เชื่อมต่อได้')).catch(e => alert('❌ ' + e.message));
   });
   GM_registerMenuCommand('🔄 ดึงข้อมูลตอนนี้', () => run());
+  if (/momocargo/.test(location.hostname)) GM_registerMenuCommand('💱 อ่านเรทหยวนจากหน้านี้', () => { const v = readRate(); v ? sendRate(v, 'momo-manual', true) : say('ไม่พบข้อความ "เรทเงินหยวนวันนี้ ฿x/¥1" ในหน้านี้', 1); });
 
   /* ---------- ส่งเข้า Apps Script ---------- */
   function post(body) {
@@ -272,26 +273,34 @@
   }
 
   /* ---------- เรทหยวนวันนี้ของ Momo ("เรทเงินหยวนวันนี้: ฿5.22/¥1") ---------- */
+  // อ่านแบบยืดหยุ่น: "เรทเงินหยวนวันนี้: แสดงกราฟ ฿5.22/¥1" · ขึ้นบรรทัดใหม่ได้ · ฿/THB/บาท · ¥/￥/หยวน
   function readRate() {
-    const t = (document.body && document.body.innerText) || '';
-    const m = t.match(/เรทเงินหยวน(?:วันนี้)?\s*:?[\s\S]{0,60}?฿\s*([\d.]+)\s*\/\s*¥?\s*1\b/);
-    const v = m ? +m[1] : 0; return v > 3 && v < 10 ? v : 0;
+    const t = ((document.body && document.body.innerText) || '').replace(/\u00a0/g, ' ');
+    const pats = [
+      /เรท\s*(?:เงิน)?\s*หยวน[\s\S]{0,120}?(?:฿|THB|บาท)\s*([3-9](?:[.,]\d{1,4})?)\s*(?:\/|ต่อ)\s*(?:¥|￥|CNY|หยวน)?\s*1?/i,
+      /(?:฿|THB)\s*([3-9][.,]\d{1,4})\s*\/\s*(?:¥|￥|CNY)\s*1/i,
+      /(?:¥|￥)\s*1\s*=\s*(?:฿|THB)?\s*([3-9][.,]\d{1,4})/i
+    ];
+    for (const re of pats) { const m = t.match(re); if (m) { const v = +String(m[1]).replace(',', '.'); if (v > 3 && v < 10) return v; } }
+    return 0;
   }
-  async function sendRate(v, src) {
+  async function sendRate(v, src, loud) {
+    if (!v) return false;
     const k = new Date().toISOString().slice(0, 10) + ':' + v;
-    if (!v || GM_getValue('rate_sent', '') === k) return;
-    try { await post({ action: 'rate', rate: v, source: src }); GM_setValue('rate_sent', k); } catch (e) { }
+    if (GM_getValue('rate_sent', '') === k) { if (loud) say('Momo: เรทหยวนวันนี้ ฿' + v + '/¥ (บันทึกไว้แล้ว ✅)'); return true; }
+    try { await post({ action: 'rate', rate: v, source: src }); GM_setValue('rate_sent', k); say('Momo: บันทึกเรทหยวนวันนี้ ฿' + v + '/¥ ✅'); return true; }
+    catch (e) { say('Momo: บันทึกเรทไม่สำเร็จ – ' + e.message + (/unknown action/.test(e.message) ? ' (Apps Script ยังไม่ได้ทำให้ใช้งานได้เวอร์ชันใหม่)' : ''), 1); return false; }
   }
   // ตอนกดดึงทันที: เปิดหน้า "บริการ Alipay" ผ่านเมนู แล้วอ่านเรท
   async function momoRateFromMenu() {
-    let v = readRate(); if (v) { await sendRate(v, 'momo-page'); return false; }
+    let v = readRate(); if (v) { await sendRate(v, 'momo-page', true); return false; }
     let link = byText('a,li,span,div', /^บริการ\s*Alipay$/);
     if (!link) { const g = byText('a,li,span,div', /^(บริการ\s*\/\s*)?ธุรกรรมฝั่งจีน$/); if (g) { g.click(); await sleep(800); link = byText('a,li,span,div', /^บริการ\s*Alipay$/); } }
     if (!link) { say('Momo: หาเมนู "บริการ Alipay" ไม่เจอ – ไม่ได้อ่านเรทหยวน', 1); return false; }
     say('Momo: อ่านเรทหยวนวันนี้…'); link.click();
     for (let t = 0; t < 20 && !(v = readRate()); t++) await sleep(400);
-    if (v) { await sendRate(v, 'momo-alipay'); say('Momo: ดึงเสร็จ · เรทหยวนวันนี้ ฿' + v + '/¥'); }
-    else say('Momo: อ่านเรทหยวนไม่ได้', 1);
+    if (v) await sendRate(v, 'momo-alipay', true);
+    else say('Momo: เปิดหน้า Alipay แล้วแต่อ่านเรทหยวนไม่ได้ – กรอกเรทเองในแอป ⚙️ ได้', 1);
     return true;
   }
 
@@ -333,7 +342,7 @@
   async function beat() {
     if (!cfg().url || !cfg().token) return say('ยังไม่ได้ตั้งค่า: เมนู Tampermonkey → ⚙️ ตั้งค่า Import Tracker', 1);
     const [ready, why] = readiness();
-    if (site() === 'momo' && !P.busy) sendRate(readRate(), 'momo-page');
+    if (site() === 'momo' && !P.busy) { const v = readRate(); if (v) sendRate(v, 'momo-page'); }
     try {
       const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy || ready ? (P.msg || 'พร้อม') : why, ver: GM_info.script.version });
       if (r.pull && ready && !P.busy) { say((site() === 'tb' ? 'Taobao' : 'Momo') + ': แอปสั่งดึง – เริ่ม…'); run().then(() => setTimeout(beat, 500)); }
