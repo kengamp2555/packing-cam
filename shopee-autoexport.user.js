@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.13
+// @version      3.15
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -496,24 +496,70 @@
     }
     return rows;
   }
+  /** ออเดอร์ "ยกเลิกแล้ว" ที่ต้องดึงกล่องออก (ยกเลิกหลังกดจัดส่ง / มีเลขพัสดุ) · ออเดอร์ที่ตรวจแล้วจำไว้ ไม่ขอซ้ำ */
+  async function tsCancels(shop) {
+    const post = (p, b) => fetch('/api/v3/order/' + p + '?SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2', { method: 'POST', credentials: 'include',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+    const key = 'cxSeen_' + shop.toLowerCase();
+    let seen = {}; try { seen = JSON.parse(GM_getValue(key, '{}')) || {}; } catch (e) { }
+    const cd = new Date(Date.now() - TOSHIP_BACK_DAYS * 864e5), p2 = n => String(n).padStart(2, '0');
+    const cut = String(cd.getFullYear()).slice(2) + p2(cd.getMonth() + 1) + p2(cd.getDate());   // เลขออเดอร์ขึ้นต้นด้วย ปปดดวว ที่สั่ง
+    const list = [], done = [];
+    for (let page = 1; page <= 2; page++) {                    // 80 ออเดอร์ยกเลิกล่าสุด · ดูเฉพาะที่สั่งใน TOSHIP_BACK_DAYS วัน (เท่าไฟล์รายงานเดิม)
+      const r = await post('search_order_list_index', { order_list_tab: 600, entity_type: 1, pagination: { page_number: page, page_size: 40 }, sort: { sort_type: 3, ascending: false } });
+      if (!r || r.code !== 0 || !r.data) throw new Error('อ่านออเดอร์ยกเลิกไม่ได้ (' + ((r && (r.user_message || r.message)) || 'ไม่มีข้อมูล') + ')');
+      const L = r.data.index_list || [], fresh = L.filter(x => !seen[x.order_id]);
+      for (let i = 0; i < fresh.length; i += 5) {
+        const c = await post('get_order_list_card_list', { order_list_tab: 600, need_count_down_desc: false,
+          order_param_list: fresh.slice(i, i + 5).map(x => ({ order_id: x.order_id, shop_id: x.shop_id, region_id: x.region_id })) });
+        if (!c || c.code !== 0 || !c.data) throw new Error('อ่านรายละเอียดออเดอร์ยกเลิกไม่ได้ (' + ((c && (c.user_message || c.message)) || 'ไม่มีข้อมูล') + ')');
+        (c.data.card_list || []).forEach(x => {
+          const p = x.order_card || x.package_card || {}, sn = String((p.card_header && p.card_header.order_sn) || '');
+          const oid = (p.order_ext_info && p.order_ext_info.order_id) || ''; if (oid) done.push(oid);
+          if (!sn || sn.slice(0, 6) < cut) return;
+          const reason = String((p.status_info && p.status_info.status_description && p.status_info.status_description.description_value) || '');
+          const track = ((p.fulfilment_info && p.fulfilment_info.tracking_number_list) || [])[0] || '';
+          if (!track && !/หลังจาก.*จัดส่ง/.test(reason)) return;  // ยกเลิกก่อนกดจัดส่ง = ไม่มีกล่อง
+          const items = [];
+          ((p.item_info_group && p.item_info_group.item_info_list) || []).forEach(g => (g.item_list || []).forEach(it => {
+            const nm = String(it.name || '').replace(/^\(สินค้ามีตัวเลือก\)\s*/, '').replace(/\s+/g, ' ').trim();
+            let v = String(it.description || '').replace(/^ตัวเลือกสินค้า:\s*/, '').replace(/^\[+|\]+$/g, '').replace(/\s+/g, ' ').trim();
+            if (v && nm.indexOf(v.slice(0, 20)) === 0) v = '';      // บางการ์ดใส่ชื่อสินค้าซ้ำในช่องตัวเลือก
+            items.push((nm.slice(0, 50) + (v ? ' [' + v.slice(0, 40) + ']' : '')).trim() + ' ×' + (it.amount || 1));
+          }));
+          list.push({ order: sn, track, reason, items: items.join(' | ') });
+        });
+        await sleep(150);
+      }
+      if (L.length < 40 || !fresh.length) break;               // หน้านี้ตรวจหมดแล้ว → หน้าถัดไปก็ตรวจแล้ว
+    }
+    return { list, commit() {                                  // จำไว้หลังส่งเข้าเซิร์ฟเวอร์สำเร็จเท่านั้น
+      const now = Date.now(); done.forEach(id => { seen[id] = now; });
+      Object.keys(seen).forEach(id => { if (now - seen[id] > 60 * 864e5) delete seen[id]; });
+      GM_setValue(key, JSON.stringify(seen));
+    } };
+  }
   async function syncToShip(shop, why) {
     if (tsRunning || running) return; tsRunning = true;
     const k = shop.toLowerCase(), st = msg => { label.textContent = msg; };
     try {
       await withLock('toship|' + k, st, async () => {
-        // ⚡ ขั้นที่ 1: อ่านรายการตรง (ไม่กี่วินาที) → กระดิ่งในแอปอัปเดตทันที
+        // ⚡ อ่านตรงจากหน้า Seller Centre: "ที่ต้องจัดส่ง" + "ยกเลิกแล้ว" (ไม่กี่วินาที) → กระดิ่งในแอปอัปเดตทันที
         try {
-          st('⚡ [' + shop + '] อ่านรายการที่ต้องจัดส่ง…');
-          const t0 = Date.now(), rows = await tsList();
-          const r = await api('shopeeToShipList', { shop, rows });
+          st('⚡ [' + shop + '] อ่านรายการที่ต้องจัดส่ง + ออเดอร์ยกเลิก…');
+          const t0 = Date.now(), rows = await tsList(), cx = await tsCancels(shop);
+          const r = await api('shopeeToShipList', { shop, rows, cancels: cx.list });
           if (r && r.error) throw new Error(r.error);
+          cx.commit();
           await sset('tsOk_' + k, Date.now());
-          st('⚡ [' + shop + '] อัปเดตแล้ว ' + rows.filter(x => x.track).length + ' กล่อง (' + Math.round((Date.now() - t0) / 1000) + ' วิ) · ตรวจออเดอร์ยกเลิกต่อจากไฟล์รายงาน…');
-        } catch (e) { st('⚠️ [' + shop + '] อ่านรายการเร็วไม่ได้ (' + e.message + ') – ใช้ไฟล์รายงานแทน'); console.warn('[Packing Cam ⚡]', e); }
-        // ขั้นที่ 2: ไฟล์รายงาน (ช้า) – ใช้ตรวจออเดอร์ที่ถูกยกเลิกหลังกดจัดส่ง (รายการที่ต้องจัดส่งไม่แสดงออเดอร์ที่ยกเลิกแล้ว)
+          st('🟢 [' + shop + '] อัปเดตแล้ว ' + new Date().toTimeString().slice(0, 5) + ' · ' + rows.filter(x => x.track).length + ' กล่อง' +
+            (cx.list.length ? ' · ⛔ ยกเลิกหลังกดจัดส่ง ' + cx.list.length : '') + ' (' + Math.round((Date.now() - t0) / 1000) + ' วิ) • พร้อมรับคำขอจากแอป');
+          return;
+        } catch (e) { st('⚠️ [' + shop + '] อ่านจากหน้ารายการไม่ได้ (' + e.message + ') – ใช้ไฟล์รายงานแทน'); console.warn('[Packing Cam ⚡]', e); }
+        // สำรอง: ไฟล์รายงาน (ช้า) – ใช้เมื่ออ่านจากหน้ารายการไม่ได้
         const d = new Date(); d.setDate(d.getDate() - TOSHIP_BACK_DAYS);
         const from = ymd(d), to = ymd(new Date());
-        st('🚚 [' + shop + '] ดึงรายการที่ต้องจัดส่ง ' + from + ' → ' + to + (why ? ' (' + why + ')' : '') + '…');
+        st('🚚 [' + shop + '] ดึงรายการที่ต้องจัดส่ง ' + from + ' → ' + to + (why ? ' (' + (why === 'auto' ? 'รอบอัตโนมัติ' : why) + ')' : '') + '…');
         let job;
         try { job = await ordRequest(from, to); }
         catch (e) { st('🚚 [' + shop + '] Shopee ให้รอ 1 นาที…'); await sleep(65000); job = await ordRequest(from, to); }
@@ -527,10 +573,17 @@
     } catch (e) { st('❌ ที่ต้องจัดส่ง: ' + e.message); console.warn('[Packing Cam ที่ต้องจัดส่ง]', e); }
     finally { tsRunning = false; }
   }
-  function toShipDue(shop) {
-    const h = new Date().getHours();
+  function toShipDue(shop, auto) {
+    const last = +sget('tsOk_' + shop.toLowerCase(), 0);
+    if (auto && auto.from) {                                  // ⏱ ตั้งในแอป (กระดิ่ง → ⏱) เช่น 09:30–14:30 ทุก 15 นาที
+      if (!auto.on) return false;
+      const d = new Date(), hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      if (hm < auto.from || hm > auto.to) return false;
+      return Date.now() - last > (Number(auto.every) || 60) * 60000 - 30000;
+    }
+    const h = new Date().getHours();                          // เซิร์ฟเวอร์รุ่นเก่า → ทุกชั่วโมงตามเดิม
     if (h < TOSHIP_HOURS[0] || h > TOSHIP_HOURS[1]) return false;
-    return Date.now() - +sget('tsOk_' + shop.toLowerCase(), 0) > 55 * 60000;
+    return Date.now() - last > 55 * 60000;
   }
 
 
@@ -869,7 +922,7 @@
           }
         }
         if (r.toship) await syncToShip(myShop, 'กด 🔄 ในแอป');
-        else if (toShipDue(myShop)) await syncToShip(myShop, 'รอบรายชั่วโมง');
+        else if (toShipDue(myShop, r.auto)) await syncToShip(myShop, 'auto');
       } catch (e) { /* เน็ตหลุดชั่วคราว รอบหน้าค่อยลองใหม่ */ }
     }
   })();

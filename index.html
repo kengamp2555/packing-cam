@@ -491,7 +491,27 @@ function holdHit(code) {
   return holdItems.find(h => { const t = normT(h.track); return t && (t === k || (t.length >= 8 && (k.indexOf(t) >= 0 || t.indexOf(k) >= 0))); }) || null;
 }
 /* 🔔 กระดิ่ง: สรุปวันนี้ (ยกเลิก-ห้ามส่ง + แพคไปกี่กล่อง) */
-var todayData = null, todayBusy = false;
+var todayData = null, todayBusy = false, autoOpen = false, autoMsg = '';
+const autoLabel = a => !a ? '⏱ ดึงอัตโนมัติ' : !a.on ? '⏱ ปิดดึงอัตโนมัติ' : '⏱ ' + a.from.replace(/^0/, '') + '–' + a.to.replace(/^0/, '') + ' ทุก ' + (a.every >= 60 ? (a.every / 60) + ' ชม.' : a.every + ' นาที');
+function autoBox(a) {
+  a = a || { on: true, from: '08:00', to: '15:00', every: 60 };
+  return '<div style="margin-top:8px;background:#1f2430;border:1px solid #3b6cf6;border-radius:12px;padding:10px 12px">' +
+    '<b>⏱ ดึงข้อมูลอัตโนมัติ</b>' +
+    '<label style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" id="apOn"' + (a.on ? ' checked' : '') + ' style="width:20px;height:20px"> เปิดใช้งาน</label>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">ช่วงเวลา <input type="time" id="apFrom" value="' + esc(a.from) + '" style="width:auto"> ถึง <input type="time" id="apTo" value="' + esc(a.to) + '" style="width:auto"></div>' +
+    '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">ดึงทุก <select id="apEvery" style="width:auto">' +
+      [5, 10, 15, 20, 30, 60].map(n => '<option value="' + n + '"' + (n === +a.every ? ' selected' : '') + '>' + (n === 60 ? '1 ชั่วโมง' : n + ' นาที') + '</option>').join('') + '</select></div>' +
+    '<p class="mut" style="margin:8px 0 0;font-size:12.5px">Lazada ดึงจากเซิร์ฟเวอร์ (ไม่ต้องเปิดอะไร) · Shopee ต้องเปิดแท็บร้านค้างไว้ · Shopee อ่านทั้งที่ต้องจัดส่งและออเดอร์ยกเลิกจากหน้ารายการ (ไม่กี่วินาที)</p>' +
+    (autoMsg ? '<p class="bad" style="margin:6px 0 0">' + esc(autoMsg) + '</p>' : '') +
+    '<div style="display:flex;gap:8px;margin-top:10px"><button class="pri" id="apSave">บันทึก</button><button id="apCancel">ยกเลิก</button></div></div>';
+}
+function saveAuto() {
+  const b = $('apSave'); b.disabled = true; b.textContent = '⏳';
+  callApi('autoPullSave', { on: $('apOn').checked, from: $('apFrom').value, to: $('apTo').value, every: +$('apEvery').value }).then(r => {
+    if (todayData) todayData.auto = r.auto;
+    autoMsg = r.warn || ''; autoOpen = !!r.warn; renderToday(r.warn ? '' : '✅ บันทึกแล้ว: ' + autoLabel(r.auto).slice(2));
+  }).catch(e => { autoMsg = '❌ ' + (e.message || e); renderToday(''); });
+}
 function loadHold(fresh) {
   if (!IN_GAS && !API_URL) return Promise.resolve();
   if (todayBusy) return Promise.resolve();
@@ -535,8 +555,10 @@ function renderToday(msg) {
   const P = $('todayPanel'); if (P.hidden) return;
   const r = todayData, th = d => { const p = String(d || '').split('-'); return p.length === 3 ? +p[2] + '/' + +p[1] + '/' + (+p[0] + 543) : d; };
   let h = '<div class="row2"><b style="font-size:18px">🔔 สถานะส่งของ ' + (r ? th(r.today) : '') + '</b><button id="tdClose">✕</button></div>';
-  h += '<div class="row2" style="margin-top:8px"><span class="mut">' + (msg ? esc(msg) : r && r.updatedAt ? 'ข้อมูล Lazada ล่าสุด ' + esc(r.updatedAt.slice(11, 16)) + ' น. (อัปเดตเองทุกชั่วโมง)' : '') + '</span>' +
-    '<button class="pri" id="tdRefresh"' + (todayBusy ? ' disabled' : '') + '>🔄 อัปเดตทันที</button></div>' +
+  h += '<div class="row2" style="margin-top:8px"><span class="mut">' + (msg ? esc(msg) : r && r.updatedAt ? 'ข้อมูล Lazada ล่าสุด ' + esc(r.updatedAt.slice(11, 16)) + ' น.' : '') + '</span>' +
+    '<span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button id="tdAuto" style="background:#2a2f3a;border:1px solid #3b6cf6">' + esc(autoLabel(r && r.auto)) + '</button>' +
+    '<button class="pri" id="tdRefresh"' + (todayBusy ? ' disabled' : '') + '>🔄 อัปเดตทันที</button></span></div>' +
+    (autoOpen ? autoBox(r && r.auto) : '') +
     '<div class="mut" style="margin-top:6px;background:#1f2430;border-radius:10px;padding:8px 10px">📌 ก่อนกดอัปเดต (Shopee): เปิดแท็บ <b>seller.shopee.co.th → คำสั่งซื้อ → การคืนเงิน/คืนสินค้า/ยกเลิก</b> ค้างไว้ ร้านละ 1 แท็บ ในโปรไฟล์ Chrome ของร้านนั้น (คอมที่ลง Tampermonkey · ห้ามให้คอมหลับ) · Lazada ไม่ต้องเปิดอะไร</div>';
   if (!r) { $('todaySheet').innerHTML = h + '<p class="mut">กำลังโหลด…</p>'; bindToday(); return; }
   h += '<h3>' + (r.hold.length ? '<span class="bad">⛔ ลูกค้ายกเลิก – อย่าจัดส่ง ' + r.hold.length + ' กล่อง</span>' : '<span class="ok">✅ ไม่มีกล่องที่ถูกยกเลิก</span>') + '</h3>';
@@ -572,12 +594,14 @@ function renderToday(msg) {
   });
   if (o.packed) h += '<details><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary><ul>' + o.list.map(x => '<li>' + esc(x.track) + '</li>').join('') + '</ul></details>';
   if (L.prepared || L.pending) h += '<p class="bad" style="margin:4px 0">🕒 Lazada: ' + [L.prepared ? 'ยังไม่กดจัดส่ง (เตรียมจัดส่ง) ' + L.prepared : '', L.pending ? 'สั่งมาใหม่ (ที่ต้องบรรจุ) ' + L.pending : ''].filter(String).join(' · ') + '</p>';
-  h += '<p class="mut" style="margin-top:10px">• ตัวหลัง = กล่องที่พิมพ์/กดจัดส่งแล้ว รอขนส่งมารับ ณ เวลาที่อัปเดตล่าสุด (Shopee “ดำเนินการแล้ว” · Lazada “ที่ต้องส่งมอบให้บริษัทขนส่ง”) · ขนส่งรับไปแล้ว = หายจากรายการ<br>• ตัวหน้า = ในกล่องเหล่านั้น ยิงบาร์โค้ดใน Packing Cam แล้วกี่กล่อง · Lazada อัปเดตเองทุกชั่วโมง · Shopee ทุกชั่วโมง 8:00–14:00 · กด 🔄 เพื่ออัปเดตตอนนี้</p>';
+  h += '<p class="mut" style="margin-top:10px">• ตัวหลัง = กล่องที่พิมพ์/กดจัดส่งแล้ว รอขนส่งมารับ ณ เวลาที่อัปเดตล่าสุด (Shopee “ดำเนินการแล้ว” · Lazada “ที่ต้องส่งมอบให้บริษัทขนส่ง”) · ขนส่งรับไปแล้ว = หายจากรายการ<br>• ตัวหน้า = ในกล่องเหล่านั้น ยิงบาร์โค้ดใน Packing Cam แล้วกี่กล่อง · ดึงอัตโนมัติตามที่ตั้งไว้ที่ปุ่ม ⏱ (นอกช่วงนั้น Lazada ยังดึงเองทุกชั่วโมง) · กด 🔄 เพื่ออัปเดตตอนนี้</p>';
   $('todaySheet').innerHTML = h; bindToday();
 }
 function bindToday() {
   $('tdClose').onclick = () => { $('todayPanel').hidden = true; };
   $('tdRefresh').onclick = () => loadHold(true);
+  $('tdAuto').onclick = () => { autoOpen = !autoOpen; autoMsg = ''; renderToday(''); };
+  if ($('apSave')) { $('apSave').onclick = saveAuto; $('apCancel').onclick = () => { autoOpen = false; autoMsg = ''; renderToday(''); }; }
   const nb = $('tdNoBc');
   if (nb) nb.onclick = () => { $('todayPanel').hidden = true; setMode('find'); bcInput.value = 'NO-BARCODE'; doSearch('NO-BARCODE'); };
   $('todaySheet').querySelectorAll('button[data-h]').forEach(x => x.onclick = () => holdDone(todayData.hold[+x.dataset.h].track, x));
@@ -1653,7 +1677,7 @@ const GAS_FN = { upload: 'uploadPhoto', search: 'searchRecords', delete: 'delete
                  rlookup: 'returnLookup', receive: 'returnReceive', rpending: 'returnPending',
                  shopeeShops: 'shopeeShops', shopeeUpload: 'shopeeUpload', shopeeRequest: 'shopeeRequest',
                  rdone: 'returnReceived', rimage: 'returnImage', rmatch: 'returnMatchOrder', hold: 'cancelHold', holdDone: 'cancelHoldDone',
-                 today: 'todaySummary', todayRefresh: 'todayRefresh' };
+                 today: 'todaySummary', todayRefresh: 'todayRefresh', autoPullSave: 'autoPullSave' };
 
 function callApi(action, payload) {
   if (IN_GAS) {
