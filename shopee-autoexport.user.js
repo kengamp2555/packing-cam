@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.16
+// @version      3.17
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -267,6 +267,54 @@
    * want = ร้านที่ต้องการ (จากคำขอ/ลิงก์) · '' = ร้านของแท็บนี้
    * เช็กบัญชีก่อนเริ่ม: ถ้าไม่ใช่ร้านที่ต้องการ → ส่งคำขอต่อให้แท็บของร้านนั้นแทน (ไม่ Export ผิดร้าน)
    */
+  /* ⚡ อ่านรายการคืนสินค้า/ส่งไม่สำเร็จจากหน้าเว็บตรง (ไม่ต้องรอ Shopee สร้างไฟล์) · ไม่ส่งข้อมูลผู้ซื้อ */
+  const RT_BACK_DAYS = 45;               // คืนสินค้า: ดูคำขอที่ยื่นในกี่วันล่าสุด (ไฟล์รายงานเดิมได้ 30 วัน)
+  const RT_FAIL_DAYS = 60;               // ส่งไม่สำเร็จ: ดูออเดอร์ที่สั่งในกี่วันล่าสุด
+  async function rtList() {
+    const go = (cs, page) => fetch('/api/v4/seller_center/return/return_list/get_exceptional_case_list?SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2', {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language: 'th', is_reverse_sorting_order: false, page_number: page, page_size: 40, keyword: null, pending_action: null, request_solution: null,
+        forward_logistics_statuses: [], reverse_logistics_statuses: [], return_reasons: [], create_time_range: { lower_value: null, upper_value: null },
+        compensation_amount_option: null, advanced_fulfilment_option: null, seller_request_statuses: [], validation_type_option: null, request_adjusted: null,
+        refund_amount_range: { lower_value: null, upper_value: null }, invoice_statuses: null, fulfilled_by_shopee_option: null,
+        flow_tab: 1, case_tab: cs, sorting_field: 1, key_action_due_time_range: { lower_value: null, upper_value: null }, platform_type: 'sc' })
+    }).then(r => r.json());
+    const p2 = n => String(n).padStart(2, '0');
+    const fmt = t => { t = +t; if (!t) return ''; const d = new Date(t * 1000); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+    const snDate = sn => { const m = String(sn || '').match(/^(\d{2})(\d{2})(\d{2})/); return m ? '20' + m[1] + '-' + m[2] + '-' + m[3] : ''; };
+    const cutOf = days => { const d = new Date(Date.now() - days * 864e5); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); };
+    const out = [];
+    for (const [cs, src, days] of [[1, 'R', RT_BACK_DAYS], [3, 'F', RT_FAIL_DAYS]]) {   // case_tab 1 = คืนเงิน/คืนสินค้า · 3 = จัดส่งไม่สำเร็จ
+      const cut = cutOf(days);
+      for (let page = 1; page <= 25; page++) {
+        const r = await go(cs, page);
+        if (!r || r.code !== 0 || !r.data) throw new Error('อ่านรายการคืนสินค้าไม่ได้ (' + ((r && (r.user_message || r.message || r.msg)) || 'ไม่มีข้อมูล') + ')');
+        const L = r.data.exceptional_case_list || [];
+        L.forEach(c => {
+          const date = snDate(src === 'R' ? c.return_sn : c.order_sn); if (!date || date < cut) return;
+          const fw = c.forward_logistics_info || {}, rv = c.reverse_logistics_info || {};
+          const attr = {}; ((c.header && c.header.attribute_list && c.header.attribute_list.return_attributes) || []).forEach(a => { attr[a.key] = a.value; });
+          const rvT = (rv.tracking_numbers || []).filter(Boolean)[0] || '', fwT = (fw.tracking_numbers || []).filter(Boolean)[0] || '';
+          const rvS = rv.aggregated_logistics_status_text && rv.aggregated_logistics_status_text !== 'ไม่มี' ? rv.aggregated_logistics_status_text : '';
+          (c.product_items || []).forEach(it => {
+            const pr = it.product || {}, md = it.model || {};
+            out.push({ src, order: c.order_sn || '', req: src === 'R' ? (c.return_sn || '') : '',
+              type: src === 'R' ? (c.request_solution_text || '') : 'ส่งไม่สำเร็จ (ตีกลับ)', st: (c.header && c.header.status_text) || '',
+              ship: src === 'R' ? rvS : (rvS || fw.aggregated_logistics_status_text || ''),
+              sku: md.sku || pr.sku || '', psku: pr.sku || '', name: String(pr.name || '').slice(0, 120), model: String(md.name || '').slice(0, 80),
+              qty: String(it.returned_amount || it.amount || ''), amt: src === 'R' ? String(c.display_refund_amount || '').replace(/[^\d.]/g, '') : '',
+              reason: src === 'R' ? (c.request_reason_text || '') : '', date,
+              track: src === 'R' ? rvT : (fwT || rvT), trackOut: src === 'R' ? fwT : '',
+              backAt: /^จัดส่งสำเร็จ|คืนผู้ขายแล้ว/.test(rvS) ? fmt(rv.latest_logistics_status_update_time) : '',
+              deadline: fmt(attr.return_seller_due_date) });
+          });
+        });
+        if (!(r.data.pagination_info && r.data.pagination_info.has_more) || !L.length) break;
+        await sleep(200);
+      }
+    }
+    return out;
+  }
   async function run(want, source) {
     if (running) return; running = true;
     const st = msg => { label.textContent = msg; };
@@ -286,6 +334,23 @@
         return;
       }
       if (source !== 'queue') api('shopeeState', { shop, state: 'running' }, true).catch(() => {});
+
+      // ⚡ อ่านจากหน้าเว็บก่อน (ไม่กี่วินาที) · อ่านไม่ได้ → ใช้ไฟล์รายงานแบบเดิม
+      try {
+        st('⚡ [' + shop + '] อ่านรายการคืนสินค้า/ส่งไม่สำเร็จ…');
+        const t0 = Date.now(), list = await rtList();
+        const res = await api('shopeeReturnsList', { shop, list });
+        if (!res || res.error || res.busy || res.skipped) throw new Error((res && (res.error || res.skipped)) || 'ระบบกำลังนำเข้ารอบอื่นอยู่');
+        const t = new Date().toTimeString().slice(0, 5), msg = 'อ่านจากหน้าเว็บ ' + list.length + ' รายการ (ใหม่ ' + (res.fresh || 0) + ') เวลา ' + t;
+        await sset('lastOk_' + shop.toLowerCase(), Date.now());
+        await api('shopeeState', { shop, state: 'done', msg }, true).catch(() => {});
+        st('✅ [' + shop + '] ' + msg + ' · ' + Math.round((Date.now() - t0) / 1000) + ' วิ');
+        return;
+      } catch (e) {
+        console.warn('[Packing Cam ⚡ คืนสินค้า]', e);
+        if (source === 'auto') throw new Error('อ่านรายการคืนสินค้าไม่ได้ (' + e.message + ') – รอบอัตโนมัติไม่ดึงไฟล์รายงาน กด ⚡ ในแอปเพื่อใช้ไฟล์รายงาน');
+        st('⚠️ [' + shop + '] อ่านจากหน้าเว็บไม่ได้ (' + e.message + ') – ใช้ไฟล์รายงานแทน'); await sleep(1500);
+      }
 
       st('⏳ [' + shop + '] ตรวจรายงานเดิม…');
       const before = new Set((await reportList()).map(r => r.report_id));
@@ -924,7 +989,11 @@
           }
         }
         if (r.toship) await syncToShip(myShop, 'กด 🔄 ในแอป');
-        else if (toShipDue(myShop, r.auto)) await syncToShip(myShop, 'auto');
+        else if (toShipDue(myShop, r.auto)) {
+          await syncToShip(myShop, 'auto');
+          const ev = Math.max(30, Number(r.auto && r.auto.every) || 60);                  // รับของตีกลับ: ดึงตามรอบ ⏱ แต่ไม่ถี่กว่า 30 นาที
+          if (!running && Date.now() - +sget('lastOk_' + myShop.toLowerCase(), 0) > ev * 60000 - 30000) await run(myShop, 'auto');
+        }
       } catch (e) { /* เน็ตหลุดชั่วคราว รอบหน้าค่อยลองใหม่ */ }
     }
   })();
