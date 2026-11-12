@@ -531,13 +531,18 @@ function watchShopee(base) {
     if (id !== shopeeWatch || Date.now() - t0 > 300000) return;
     callApi('today', {}).then(r => {
       todayData = r; holdItems = r.hold || []; renderHold();
-      const shops = (r.shopee && r.shopee.shops) || [], want = shops.filter(x => x.tabOnline), done = want.filter(x => (x.updatedAt || '') !== (before[x.shop] || ''));
-      const all = want.length > 0 && done.length === want.length;
-      renderToday(all ? '✅ อัปเดตครบแล้ว (Lazada + Shopee ' + done.map(x => x.shop).join(', ') + ')' : '⏳ Shopee กำลังดึงข้อมูล… ' + (done.length ? 'เสร็จแล้ว: ' + done.map(x => x.shop).join(', ') + ' · ' : '') + Math.round((Date.now() - t0) / 1000) + ' วิ');
+      const shops = (r.shopee && r.shopee.shops) || [], want = shops.filter(x => x.tabOnline);
+      const fin = x => (x.updatedAt || '') !== (before[x.shop] || '') || (x.tsState && x.tsState.at > t0);   // ข้อมูลใหม่ หรือแท็บรายงานว่าทำเสร็จ/ไม่สำเร็จ
+      const done = want.filter(fin), bad = done.filter(x => x.tsState && x.tsState.at > t0 && !x.tsState.ok), wait = want.filter(x => !fin(x));
+      const all = want.length > 0 && !wait.length, sec = Math.round((Date.now() - t0) / 1000);
+      const badTxt = bad.map(x => '❌ ' + x.shop + ': ' + x.tsState.msg).join(' · ');
+      renderToday(all ? (bad.length ? '⚠️ ' + badTxt : '✅ อัปเดตครบแล้ว (Lazada + Shopee ' + done.map(x => x.shop).join(', ') + ')')
+        : '⏳ Shopee กำลังดึง: ' + wait.map(x => x.shop).join(', ') + ' · ' + sec + ' วิ' + (sec > 90 ? ' (แท็บร้านนี้ยังไม่ตอบ – ดูกล่องดำมุมขวาล่างของแท็บนั้น)' : '') + (badTxt ? ' · ' + badTxt : ''));
       if (!all) setTimeout(tick, 15000);
+      else if (!bad.length) setTimeout(() => { if (id === shopeeWatch) renderToday(''); }, 8000);
     }).catch(() => setTimeout(tick, 15000));
   };
-  setTimeout(tick, 20000);
+  setTimeout(tick, 8000);
 }
 function holdDone(track, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }

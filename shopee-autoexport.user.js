@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.15
+// @version      3.16
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -552,6 +552,7 @@
           if (r && r.error) throw new Error(r.error);
           cx.commit();
           await sset('tsOk_' + k, Date.now());
+          api('shopeeToShipState', { shop, ok: true, msg: rows.length + ' ออเดอร์ · ' + Math.round((Date.now() - t0) / 1000) + ' วิ' }, true).catch(() => {});
           st('🟢 [' + shop + '] อัปเดตแล้ว ' + new Date().toTimeString().slice(0, 5) + ' · ' + rows.filter(x => x.track).length + ' กล่อง' +
             (cx.list.length ? ' · ⛔ ยกเลิกหลังกดจัดส่ง ' + cx.list.length : '') + ' (' + Math.round((Date.now() - t0) / 1000) + ' วิ) • พร้อมรับคำขอจากแอป');
           return;
@@ -566,11 +567,12 @@
         if (job.n !== 0) {
           const f = await ordFetch(job, m => st('🚚 [' + shop + '] ' + m));
           await api('shopeeUpload', { shop, name: 'ToShip.' + from.replace(/-/g, '') + '_' + to.replace(/-/g, '') + '.xlsx', data: await blobToBase64(f.blob), importNow: true });
-        }
+        } else await api('shopeeToShipList', { shop, rows: [] }).catch(() => {});   // ไม่มีออเดอร์ → บันทึกว่า 0 กล่อง (การ์ดในแอปจะไม่ค้าง "ยังไม่มีข้อมูล")
         await sset('tsOk_' + k, Date.now());
+        api('shopeeToShipState', { shop, ok: true, msg: 'ใช้ไฟล์รายงาน' }, true).catch(() => {});
         st('🟢 [' + shop + '] อัปเดตที่ต้องจัดส่งแล้ว ' + new Date().toTimeString().slice(0, 5) + ' • พร้อมรับคำขอจากแอป');
       });
-    } catch (e) { st('❌ ที่ต้องจัดส่ง: ' + e.message); console.warn('[Packing Cam ที่ต้องจัดส่ง]', e); }
+    } catch (e) { st('❌ ที่ต้องจัดส่ง: ' + e.message); console.warn('[Packing Cam ที่ต้องจัดส่ง]', e); api('shopeeToShipState', { shop, ok: false, msg: String(e.message || e).slice(0, 200) }, true).catch(() => {}); }
     finally { tsRunning = false; }
   }
   function toShipDue(shop, auto) {
