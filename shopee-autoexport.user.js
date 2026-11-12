@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.17
+// @version      3.18
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -288,7 +288,7 @@
       const cut = cutOf(days);
       for (let page = 1; page <= 25; page++) {
         const r = await go(cs, page);
-        if (!r || r.code !== 0 || !r.data) throw new Error('อ่านรายการคืนสินค้าไม่ได้ (' + ((r && (r.user_message || r.message || r.msg)) || 'ไม่มีข้อมูล') + ')');
+        if (!r || !r.data || (r.code != null && r.code !== 0) || (r.error != null && r.error !== 0 && r.error !== '')) throw new Error('อ่านรายการคืนสินค้าไม่ได้ (' + ((r && (r.user_message || r.message || r.msg)) || 'ไม่มีข้อมูล') + ')');
         const L = r.data.exceptional_case_list || [];
         L.forEach(c => {
           const date = snDate(src === 'R' ? c.return_sn : c.order_sn); if (!date || date < cut) return;
