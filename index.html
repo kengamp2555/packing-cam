@@ -563,7 +563,7 @@ function renderToday(msg) {
     (r.noBarcode ? '<div id="tdNoBc" style="cursor:pointer;border:1px solid #3b6cf6">ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b><span style="color:#8ab4ff">แตะเพื่อดู / ลบ ›</span></div>' : '') + '</div>' +
     (r.noBarcode ? '<p class="mut" style="margin:4px 0">“ไม่มีบาร์โค้ด” = รูปที่ถ่ายวันนี้แต่กล้องอ่านบาร์โค้ดไม่ได้ (บันทึกเป็น NO-BARCODE) · ถ้าเป็นกล่องจริงให้ถ่ายใหม่ให้เห็นบาร์โค้ด · ถ้าถ่ายพลาดลบได้</p>' : '');
   if (L.notPackedCount) h += '<details open><summary>Lazada ที่ต้องส่งมอบ แต่ยังไม่ยิงแพค (' + L.notPackedCount + ')</summary><ul>' +
-    L.notPacked.map(x => '<li>' + esc(x.track) + ' <span class="mut">ออเดอร์ ' + esc(x.order) + '</span></li>').join('') + '</ul></details>';
+    L.notPacked.map(x => '<li>' + esc(x.track) + ' <span class="mut">' + esc(x.order) + (x.items ? ' · ' + esc(x.items) : '') + '</span></li>').join('') + '</ul></details>';
   (sp.shops || []).forEach(x => {
     if (x.missingCount) h += '<details open><summary>Shopee ' + esc(x.shop) + ' ดำเนินการแล้ว แต่ยังไม่ยิงแพค (' + x.missingCount + ')</summary><ul>' +
       x.missing.map(m => '<li>' + esc(m.track) + ' <span class="mut">' + esc(m.order) + (m.items ? ' · ' + esc(m.items) : '') + '</span></li>').join('') + '</ul></details>';
