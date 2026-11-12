@@ -256,7 +256,7 @@
       <button id="recvDoneBtn">✅ รับคืนแล้ว</button>
     </div>
     <div id="spBox">
-      <div class="t"><span class="spBar">Shopee</span> นำเข้าไฟล์คืนสินค้า/ตีกลับ</div>
+      <div class="t"><span class="spBar">Shopee</span> นำเข้ารายการคืนสินค้า/ตีกลับ</div>
       <div id="spShops"><button id="spLoad" style="flex:1 1 100%">⬆️ โหลดรายชื่อร้าน</button></div>
       <div id="spMsg">ส่งออกไฟล์ (zip) จาก Seller Centre แล้วกดปุ่มของร้านนั้นเพื่ออัปโหลด</div>
       <input id="spFile" type="file" accept=".zip,.xlsx,.xls,application/zip" multiple hidden>
@@ -1268,7 +1268,7 @@ function loadShops() {
       const tabOn = tab && (s.now - tab.at) < 3 * 60000;          // แท็บ Mac เช็กเข้ามาภายใน 3 นาที
       let line = '';
       if (job.state === 'requested') { line = '⏳ ส่งคำขอแล้ว รอแท็บ Mac รับงาน…'; busy = true; }
-      else if (job.state === 'running' && s.now - job.at < 10 * 60000) { line = '🔄 กำลังดึงไฟล์จาก Seller Centre…'; busy = true; }
+      else if (job.state === 'running' && s.now - job.at < 10 * 60000) { line = '🔄 กำลังดึงจาก Seller Centre…'; busy = true; }
       else if (job.state === 'done') line = '✅ ' + job.msg;
       else if (job.state === 'error') line = '❌ ' + job.msg;
       else if (s.waiting) line = 'รอนำเข้า ' + s.waiting + ' ไฟล์';
@@ -1297,7 +1297,7 @@ function loadShops() {
       box.appendChild(wrap);
     });
     $('spMsg').textContent = (r.shops || []).length
-      ? 'กด ⚡ ร้าน → แท็บ Seller Centre ของร้านนั้นบน Mac จะส่งออกและส่งเข้าระบบเอง (กดจาก iPhone ก็ได้) • นำเข้าภายใน ~10 นาที'
+      ? 'กด ⚡ ร้าน → แท็บ Seller Centre ของร้านนั้นบน Mac อ่านรายการจากหน้าเว็บแล้วส่งเข้าระบบเอง (ไม่กี่วินาที · อ่านไม่ได้จะใช้ไฟล์รายงานแทน) • กดจาก iPhone ก็ได้'
       : 'ยังไม่มีโฟลเดอร์ร้าน – รัน importShopeeFiles ในโปรเจกต์ LAZADA X SHOPEE DATA 1 ครั้ง';
     clearTimeout(spTimer);
     if (busy && mode === 'recv' && !document.hidden) spTimer = setTimeout(loadShops, 10000);   // อัปเดตสถานะทุก 10 วิ ระหว่างรอ
