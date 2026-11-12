@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.11
+// @version      3.13
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -35,7 +35,7 @@
   const PAGE_RE = /\/portal\/sale\/returnrefundcancel/;
   const DAYS = 30;                       // Shopee ให้ส่งออกได้สูงสุด 30 วัน
   const WAIT_REPORT_SEC = 240;           // รอ Shopee เตรียมไฟล์สูงสุดกี่วินาที
-  const POLL_SEC = 30;                   // เช็กคำขอจากแอปทุกกี่วินาที
+  const POLL_SEC = 10;                   // เช็กคำขอจากแอปทุกกี่วินาที (กด 🔄 ในกระดิ่งแล้วเริ่มดึงภายใน ~10 วิ)
   const AUTO_ON_OPEN = false;            // true = เปิดหน้านี้แล้วดึงเองทันที · false = รอกดปุ่ม ⚡ ในแอปเท่านั้น
   const AUTO_SKIP_HOURS = 2;             // ถ้าดึงสำเร็จไปแล้วภายในกี่ชั่วโมง ไม่ดึงซ้ำตอนเปิดหน้า (กันรีเฟรชแล้วดึงซ้ำ)
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -48,7 +48,7 @@
   const INCOME_SKIP_HOURS = 3;           // เปิดหน้าซ้ำภายในกี่ชั่วโมงหลังดึงสำเร็จ ไม่ดึงอีก
   const ORDER_OVERLAP_DAYS = 45;         // คำสั่งซื้อ: ดึงทับย้อนหลังกี่วัน (สถานะยกเลิก/คืนยังเปลี่ยนได้)
   const INCOME_WAIT_MIN = 40;            // รอ Shopee เตรียมไฟล์รายรับสูงสุดกี่นาที (ปกติ 3–8 นาที)
-  const TOSHIP_BACK_DAYS = 1;            // 🚚 ที่ต้องจัดส่ง: ดึงออเดอร์ตั้งแต่กี่วันก่อน (1 = เมื่อวาน 00:00 ถึงวันนี้)
+  const TOSHIP_BACK_DAYS = 7;            // 🚚 ที่ต้องจัดส่ง: ดึงออเดอร์ที่สั่งย้อนหลังกี่วัน · 7 วัน = รวมออเดอร์ "จัดส่งช้า" ที่ค้างจากหลายวันก่อน (นับเฉพาะสถานะที่ต้องจัดส่ง)
   const TOSHIP_HOURS = [8, 14];          // ดึงเองทุกชั่วโมงช่วง 8:00–14:59 (นอกช่วงนี้ดึงเมื่อกด 🔄 ในกระดิ่งของแอปเท่านั้น)
 
   /* ---------------- ตั้งค่า (ลิงก์ /exec + รหัส เหมือนในแอป Packing Cam) ---------------- */
@@ -458,11 +458,59 @@
 
   /* ================= 🚚 ที่ต้องจัดส่ง (คำสั่งซื้อเมื่อวาน–วันนี้) → ShopeeToShip (กระดิ่งในแอป Packing Cam) ================= */
   let tsRunning = false;
+  /** ⚡ อ่าน "ที่ต้องจัดส่ง" ตรงจากรายการที่หน้า Seller Centre ใช้เอง (~2 วิ) · อ่านอย่างเดียว · ไม่ส่งข้อมูลผู้ซื้อ/ที่อยู่ */
+  async function tsList() {
+    const post = (p, b) => fetch('/api/v3/order/' + p + '?SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2', { method: 'POST', credentials: 'include',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+    const index = async status => {            // 1 = ยังไม่ดำเนินการ · 2 = ดำเนินการแล้ว
+      let all = [], tot = 0;
+      for (let page = 1; page <= 25; page++) {
+        const r = await post('search_order_list_index', { order_list_tab: 300, entity_type: 1, pagination: { page_number: page, page_size: 40 },
+          filter: { order_to_ship_status: status, fulfillment_type: 0, is_drop_off: 0, action_filter: 0, fulfillment_source: 0 }, sort: { sort_type: 2, ascending: true } });
+        if (!r || r.code !== 0 || !r.data) throw new Error('อ่านรายการไม่ได้ (' + ((r && (r.user_message || r.message)) || 'ไม่มีข้อมูล') + ')');
+        const L = r.data.index_list || []; tot = (r.data.pagination && r.data.pagination.total) || 0; all = all.concat(L);
+        if (all.length >= tot || !L.length) break;
+      }
+      return all;
+    };
+    const fmt = t => { if (!t) return ''; const d = new Date(t * 1000), p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
+    const rows = [];
+    for (const status of [2, 1]) {
+      const list = await index(status);
+      for (let i = 0; i < list.length; i += 5) {          // Shopee ให้ขอรายละเอียดได้ครั้งละ 5 กล่อง (เท่ากับหน้าเว็บ)
+        const r = await post('get_order_list_card_list', { order_list_tab: 300, need_count_down_desc: false,
+          package_param_list: list.slice(i, i + 5).map(x => ({ package_number: x.package_number, shop_id: x.shop_id, region_id: x.region_id })) });
+        if (!r || r.code !== 0 || !r.data) throw new Error('อ่านรายละเอียดไม่ได้ (' + ((r && (r.user_message || r.message)) || 'ไม่มีข้อมูล') + ')');
+        (r.data.card_list || []).forEach(c => {
+          const p = c.package_card || {}, f = p.fulfilment_info || {}, o = p.order_ext_info || {};
+          const items = [];
+          ((p.item_info_group && p.item_info_group.item_info_list) || []).forEach(g => (g.item_list || []).forEach(it => {
+            const v = String(it.description || '').replace(/^ตัวเลือกสินค้า:\s*/, '').trim();
+            items.push((String(it.name || '').replace(/\s+/g, ' ').slice(0, 50) + (v ? ' [' + v + ']' : '')).trim() + ' ×' + (it.amount || 1));
+          }));
+          rows.push({ order: (p.card_header && p.card_header.order_sn) || '', track: status === 2 ? ((f.tracking_number_list || [])[0] || '') : '',
+            method: f.fulfilment_channel_name || '', shipBy: fmt(o.ship_by_date), items: items.join(' | ') });
+        });
+        await sleep(150);
+      }
+    }
+    return rows;
+  }
   async function syncToShip(shop, why) {
     if (tsRunning || running) return; tsRunning = true;
     const k = shop.toLowerCase(), st = msg => { label.textContent = msg; };
     try {
       await withLock('toship|' + k, st, async () => {
+        // ⚡ ขั้นที่ 1: อ่านรายการตรง (ไม่กี่วินาที) → กระดิ่งในแอปอัปเดตทันที
+        try {
+          st('⚡ [' + shop + '] อ่านรายการที่ต้องจัดส่ง…');
+          const t0 = Date.now(), rows = await tsList();
+          const r = await api('shopeeToShipList', { shop, rows });
+          if (r && r.error) throw new Error(r.error);
+          await sset('tsOk_' + k, Date.now());
+          st('⚡ [' + shop + '] อัปเดตแล้ว ' + rows.filter(x => x.track).length + ' กล่อง (' + Math.round((Date.now() - t0) / 1000) + ' วิ) · ตรวจออเดอร์ยกเลิกต่อจากไฟล์รายงาน…');
+        } catch (e) { st('⚠️ [' + shop + '] อ่านรายการเร็วไม่ได้ (' + e.message + ') – ใช้ไฟล์รายงานแทน'); console.warn('[Packing Cam ⚡]', e); }
+        // ขั้นที่ 2: ไฟล์รายงาน (ช้า) – ใช้ตรวจออเดอร์ที่ถูกยกเลิกหลังกดจัดส่ง (รายการที่ต้องจัดส่งไม่แสดงออเดอร์ที่ยกเลิกแล้ว)
         const d = new Date(); d.setDate(d.getDate() - TOSHIP_BACK_DAYS);
         const from = ymd(d), to = ymd(new Date());
         st('🚚 [' + shop + '] ดึงรายการที่ต้องจัดส่ง ' + from + ' → ' + to + (why ? ' (' + why + ')' : '') + '…');
