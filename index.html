@@ -501,7 +501,7 @@ function autoBox(a) {
     '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">ช่วงเวลา <input type="time" id="apFrom" value="' + esc(a.from) + '" style="width:auto"> ถึง <input type="time" id="apTo" value="' + esc(a.to) + '" style="width:auto"></div>' +
     '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">ดึงทุก <select id="apEvery" style="width:auto">' +
       [5, 10, 15, 20, 30, 60].map(n => '<option value="' + n + '"' + (n === +a.every ? ' selected' : '') + '>' + (n === 60 ? '1 ชั่วโมง' : n + ' นาที') + '</option>').join('') + '</select></div>' +
-    '<p class="mut" style="margin:8px 0 0;font-size:12.5px">Lazada ดึงจากเซิร์ฟเวอร์ (ไม่ต้องเปิดอะไร) · Shopee ต้องเปิดแท็บร้านค้างไว้ · Shopee อ่านทั้งที่ต้องจัดส่งและออเดอร์ยกเลิกจากหน้ารายการ (ไม่กี่วินาที)</p>' +
+    '<p class="mut" style="margin:8px 0 0;font-size:12.5px">Lazada ดึงจากเซิร์ฟเวอร์ (ไม่ต้องเปิดอะไร) · Shopee ต้องเปิดแท็บร้านค้างไว้ · ใช้กับทั้งกระดิ่ง (ที่ต้องจัดส่ง + ออเดอร์ยกเลิก) และรับของตีกลับ Shopee (ดึงไม่ถี่กว่าทุก 30 นาที)</p>' +
     (autoMsg ? '<p class="bad" style="margin:6px 0 0">' + esc(autoMsg) + '</p>' : '') +
     '<div style="display:flex;gap:8px;margin-top:10px"><button class="pri" id="apSave">บันทึก</button><button id="apCancel">ยกเลิก</button></div></div>';
 }
