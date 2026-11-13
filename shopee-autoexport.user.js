@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.20
+// @version      3.22
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -31,6 +31,8 @@
  */
 (function () {
   'use strict';
+  // แท็บที่ส่วนเสริม Packing Cam เปิดเบื้องหลัง → ไม่ทำงานซ้ำ (ส่วนเสริมอ่านข้อมูลเอง)
+  try { if (/pcext/.test(location.hash)) sessionStorage.setItem('pcext', '1'); if (sessionStorage.getItem('pcext') === '1') return; } catch (e) { }
 
   const PAGE_RE = /\/portal\/sale\/returnrefundcancel/;
   const DAYS = 30;                       // Shopee ให้ส่งออกได้สูงสุด 30 วัน
@@ -935,6 +937,49 @@
     if (inc && !wasIncome) { label.textContent = '💰 เตรียมดึงรายรับ…'; setTimeout(() => runIncome(false), 2500); }   // เข้าหน้ารายรับ → ดึงเอง
     wasIncome = inc;
   }, 1000);
+
+  /* ================= 🏷️ หน้าพิมพ์ของ LnwShop (ใบจัดสินค้า): ใส่รหัส POS หน้าสินค้าทุกบรรทัด + เรียงตามรหัส POS =================
+   * อ่านรหัสสินค้า LnwShop (ตัวเลขหน้าช่อง "รหัสสินค้า") → หารหัส POS จากคอลัมน์ AO ของชีต Product (ผ่าน Packing Cam)
+   * แค่แต่งหน้าที่แสดงอยู่ ไม่กดพิมพ์ ไม่แก้ออเดอร์ · รหัสดึงใหม่ทุกครั้งที่เปิดหน้า (เซิร์ฟเวอร์จำไว้ 5 นาที) */
+  (async function lnwPrintPos() {
+    if (location.hostname !== 'a.lnwstore.com' || !/\/print\/preview\//.test(location.pathname)) return;
+    let map = null, err = '';
+    try { const r = await api('posCodes', {}, true); map = r.map || {}; } catch (e) { err = e.message; }
+    const css = document.createElement('style');
+    css.textContent = '.pc-pos{font-weight:800;font-size:1.25em;line-height:1.15;letter-spacing:.2px;color:#000;margin-bottom:2px;white-space:nowrap}.pc-pos.none{font-weight:600;font-size:.85em;color:#999}' +
+      '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}@media print{#pc-pos-note{display:none!important}}';
+    document.head.appendChild(css);
+    const note = document.createElement('div'); note.id = 'pc-pos-note'; document.body.appendChild(note);
+    if (!map) { note.className = 'err'; note.textContent = '🏷️ ใส่รหัส POS ไม่ได้: ' + err; return; }
+    const cmp = (a, b) => (a ? 0 : 1) - (b ? 0 : 1) || String(a).localeCompare(String(b), 'en', { numeric: true });
+    let busy = false;
+    const apply = () => {
+      if (busy) return; busy = true;
+      try {
+        let hit = 0, miss = 0;
+        document.querySelectorAll('.itemslist').forEach(list => {
+          const rows = [...list.children].filter(x => x.classList.contains('item'));
+          if (!rows.length) return;
+          rows.forEach(tr => {
+            const td = tr.querySelector('.td.code'); if (!td) return;
+            let tag = td.querySelector('.pc-pos');
+            const raw = (td.querySelector('span:not(.pc-pos)') || td).textContent, m = /^\s*(\d+)/.exec(raw), pid = m ? m[1] : '';
+            const code = pid ? (map[pid] || '') : '';
+            if (!tag) { tag = document.createElement('div'); td.insertBefore(tag, td.firstChild); }
+            if (tag.dataset.pid !== pid) { tag.dataset.pid = pid; tag.className = 'pc-pos' + (code ? '' : ' none'); tag.textContent = code || '—'; }
+            tr.dataset.pcCode = code; code ? hit++ : miss++;
+          });
+          // เรียงตามรหัส POS ด้วย CSS order (ไม่ย้าย DOM ของหน้า) แล้วเลขลำดับใหม่
+          const sorted = rows.slice().sort((a, b) => cmp(a.dataset.pcCode, b.dataset.pcCode) || rows.indexOf(a) - rows.indexOf(b));
+          if (getComputedStyle(list).display !== 'flex') { list.style.display = 'flex'; list.style.flexDirection = 'column'; }
+          sorted.forEach((tr, i) => { tr.style.order = String(i); const n = tr.querySelector('.td.number'); if (n && n.textContent !== (i + 1) + '.') n.textContent = (i + 1) + '.'; });
+        });
+        note.className = ''; note.textContent = '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + ' · เรียงตามรหัส POS แล้ว';
+      } finally { busy = false; }
+    };
+    let t = 0; new MutationObserver(() => { clearTimeout(t); t = setTimeout(apply, 250); }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    apply();
+  })();
 
   /* ---------------- เปิดมาจากลิงก์ #pcauto=ร้าน (รองรับแบบเดิม) ---------------- */
   const m = location.hash.match(/pcauto=([^&]+)/);
