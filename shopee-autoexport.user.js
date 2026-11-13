@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.22
+// @version      3.24
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -943,8 +943,24 @@
    * แค่แต่งหน้าที่แสดงอยู่ ไม่กดพิมพ์ ไม่แก้ออเดอร์ · รหัสดึงใหม่ทุกครั้งที่เปิดหน้า (เซิร์ฟเวอร์จำไว้ 5 นาที) */
   (async function lnwPrintPos() {
     if (location.hostname !== 'a.lnwstore.com' || !/\/print\/preview\//.test(location.pathname)) return;
-    let map = null, err = '';
-    try { const r = await api('posCodes', {}, true); map = r.map || {}; } catch (e) { err = e.message; }
+    let map = null, names = {}, skus = {}, err = '';
+    try { const r = await api('posCodes', {}, true); map = r.map || {}; names = r.names || {}; skus = r.skus || {}; } catch (e) { err = e.message; }
+    const skey = t => String(t || '').toLowerCase().replace(/\s+/g, '').slice(0, 160);   // = posSkuKey_ ใน Code.gs
+    // ชื่อ/รหัส LnwShop ของสินค้าแต่ละบรรทัด: อ่านจากข้อมูลออเดอร์ที่ฝังในหน้านี้ (ช่อง "รหัสสินค้า" บางตัวเป็นข้อความ ไม่ใช่รหัส LnwShop)
+    const nkey = t => String(t || '').toLowerCase().replace(/\(มีตัวเลือก\)/g, '').replace(/\[[^\]]*\]/g, '').replace(/[\s\-_.,\/()⊳:]+/g, '').slice(0, 160);   // = posNameKey_ ใน Code.gs
+    const byThumb = {}, byName = {};
+    try {
+      const h = await fetch(location.href, { credentials: 'include' }).then(r => r.text());
+      const i0 = h.indexOf('var orders = [{'); if (i0 >= 0) {
+        let i = h.indexOf('[', i0), d = 0, q = '', j = i;
+        for (; j < h.length; j++) { const c = h[j]; if (q) { if (c === '\\') j++; else if (c === q) q = ''; continue; } if (c === '"' || c === "'") q = c; else if (c === '[' || c === '{') d++; else if (c === ']' || c === '}') { d--; if (!d) break; } }
+        JSON.parse(h.slice(i, j + 1)).forEach(o => (o.product_items || []).forEach(it => {
+          const pid = String((it.spec && it.spec.product_id) || (it.product && it.product.id) || ''), x = { pid, code: (it.product && it.product.code) || '', names: [it.name, it.product && it.product.title, it.product && it.product.name] };
+          if (it.thumbnail) byThumb[it.thumbnail] = x;
+          x.names.forEach(n => { const k = nkey(n); if (k && !byName[k]) byName[k] = x; });
+        }));
+      }
+    } catch (e) { console.warn('[Packing Cam รหัส POS] อ่านข้อมูลออเดอร์ไม่ได้', e); }
     const css = document.createElement('style');
     css.textContent = '.pc-pos{font-weight:800;font-size:1.25em;line-height:1.15;letter-spacing:.2px;color:#000;margin-bottom:2px;white-space:nowrap}.pc-pos.none{font-weight:600;font-size:.85em;color:#999}' +
       '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}@media print{#pc-pos-note{display:none!important}}';
@@ -963,10 +979,15 @@
           rows.forEach(tr => {
             const td = tr.querySelector('.td.code'); if (!td) return;
             let tag = td.querySelector('.pc-pos');
-            const raw = (td.querySelector('span:not(.pc-pos)') || td).textContent, m = /^\s*(\d+)/.exec(raw), pid = m ? m[1] : '';
-            const code = pid ? (map[pid] || '') : '';
+            const img = tr.querySelector('.td.description img'), pn = tr.querySelector('.proname') || tr.querySelector('.td.description');
+            const rowName = pn ? pn.textContent : '', it = (img && byThumb[img.getAttribute('src')]) || byName[nkey(rowName)];
+            const raw = (td.querySelector('span:not(.pc-pos)') || td).textContent, m = /^\s*(\d+)\s*\//.exec(raw);
+            const pid = (it && it.pid) || (m ? m[1] : '');
+            // 1) SKU แพลตฟอร์ม (คอลัมน์ BI) → 2) pid LnwShop (AO) → 3) ชื่อสินค้า
+            let code = skus[skey(it && it.code)] || skus[skey(raw)] || (pid ? (map[pid] || '') : '');
+            if (!code) [rowName].concat(it ? it.names : []).some(n => (code = names[nkey(n)] || '') !== '');   // ไม่มีรหัส LnwShop ใน POS → เทียบชื่อ
             if (!tag) { tag = document.createElement('div'); td.insertBefore(tag, td.firstChild); }
-            if (tag.dataset.pid !== pid) { tag.dataset.pid = pid; tag.className = 'pc-pos' + (code ? '' : ' none'); tag.textContent = code || '—'; }
+            if (tag.dataset.pid !== pid + '|' + code) { tag.dataset.pid = pid + '|' + code; tag.className = 'pc-pos' + (code ? '' : ' none'); tag.textContent = code || '—'; }
             tr.dataset.pcCode = code; code ? hit++ : miss++;
           });
           // เรียงตามรหัส POS ด้วย CSS order (ไม่ย้าย DOM ของหน้า) แล้วเลขลำดับใหม่
