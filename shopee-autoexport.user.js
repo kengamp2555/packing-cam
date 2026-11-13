@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.26
+// @version      3.27
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -1001,6 +1001,40 @@
     };
     let t = 0; new MutationObserver(() => { clearTimeout(t); t = setTimeout(apply, 250); }).observe(document.body, { childList: true, subtree: true, characterData: true });
     apply();
+  })();
+
+  /* ================= 🖨️ หน้าจัดส่งของ LnwShop: ปุ่ม "พิมพ์เรียงร้าน/ขนส่ง" =================
+   * ใช้ออเดอร์ที่แสดงอยู่ในหน้า (ตามตัวกรองที่เลือกไว้ เช่น ยังไม่เคยพิมพ์ + รอจัดส่ง) เรียงตาม ร้าน → ขนส่ง → เลขออเดอร์
+   * แล้วเปิดหน้าพิมพ์ของ LnwShop ตามลำดับนั้น (ใบปะหน้าและใบจัดของออกมาลำดับเดียวกัน) · ไม่กดพิมพ์ ไม่เปลี่ยนสถานะออเดอร์ */
+  const LNW_PRINT_SHOPS = [                                    // ลำดับร้าน (ช่องทาง + ชื่อร้านใน LnwShop ไม่สนตัวพิมพ์เล็ก/ใหญ่)
+    { channel: 'lazada', shop: 'kengamp2555', label: 'Lazada KengAmp2555' },
+    { channel: 'shopee', shop: 'kengamp', label: 'Shopee KENGAMP' },
+    { channel: 'shopee', shop: 'kengamp2555', label: 'Shopee KENGAMP2555' }
+  ];
+  const LNW_PRINT_SHIP = [/SPX/i, /Flash/i];                   // ลำดับขนส่งในแต่ละร้าน (ที่เหลือต่อท้าย)
+  (function lnwPrintSorted() {
+    if (location.hostname !== 'a.lnwstore.com' || !/^\/[^/]+\/shipping\/?$/.test(location.pathname)) return;
+    const store = () => { for (const e of document.querySelectorAll('*')) { const v = e.__vue__; if (v && v.$store && v.$store.state && v.$store.state.orders) return v.$store.state; } return null; };
+    const b = document.createElement('button');
+    b.textContent = '🖨️ พิมพ์เรียงร้าน/ขนส่ง';
+    b.title = 'เปิดหน้าพิมพ์ของออเดอร์ที่แสดงอยู่ เรียง Lazada → Shopee KENGAMP → Shopee KENGAMP2555 และในแต่ละร้าน SPX ก่อน Flash';
+    b.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99999;padding:12px 18px;border:0;border-radius:12px;background:#1b7a4b;color:#fff;font:700 15px/1.2 system-ui,sans-serif;box-shadow:0 3px 10px rgba(0,0,0,.25);cursor:pointer';
+    b.onclick = () => {
+      const st = store(); if (!st) { alert('ยังอ่านรายการออเดอร์ในหน้านี้ไม่ได้ – รอหน้าโหลดเสร็จแล้วกดใหม่'); return; }
+      const all = Object.values(st.orders || {}).filter(o => o && o.id && o.stage === 'wait_send');
+      if (!all.length) { alert('ไม่มีออเดอร์ "รอจัดส่ง" ในหน้านี้'); return; }
+      const shopRank = o => { const ch = String(o.channel || '').toLowerCase(), sh = String((o.channel_data && o.channel_data.shop_name) || '').toLowerCase();
+        const i = LNW_PRINT_SHOPS.findIndex(x => x.channel === ch && x.shop === sh); return i < 0 ? LNW_PRINT_SHOPS.length : i; };
+      const shipRank = o => { const i = LNW_PRINT_SHIP.findIndex(re => re.test(o.shipping_type_text || '')); return i < 0 ? LNW_PRINT_SHIP.length : i; };
+      const list = all.slice().sort((a, b) => shopRank(a) - shopRank(b) || shipRank(a) - shipRank(b) || Number(a.id) - Number(b.id));
+      const sum = {}; list.forEach(o => { const s = (LNW_PRINT_SHOPS[shopRank(o)] || { label: (o.channel || '?') + ' ' + ((o.channel_data && o.channel_data.shop_name) || '') }).label, k = s + ' · ' + (String(o.shipping_type_text || '-').replace(/^Pickup:\s*/i, '').split(',')[0]); sum[k] = (sum[k] || 0) + 1; });
+      const total = Number(st.orders_num) || 0, more = total > all.length ? '\n\n⚠️ หน้านี้โหลดไว้ ' + Object.keys(st.orders || {}).length + ' จาก ' + total + ' ออเดอร์ – เพิ่มจำนวนต่อหน้าก่อน ถ้าอยากพิมพ์ครบ' : '';
+      if (!confirm('พิมพ์ ' + list.length + ' ออเดอร์ (เฉพาะที่แสดงอยู่ตามตัวกรอง) เรียงตามนี้:\n\n' + Object.keys(sum).map(k => '• ' + k + ' — ' + sum[k]).join('\n') + more + '\n\nแนะนำ: ใช้ตัวกรอง "ยังไม่เคยพิมพ์" + "รอจัดส่ง" ก่อนกด')) return;
+      const slug = location.pathname.split('/')[1];
+      window.open('/' + slug + '/shipping/prepare_print_sheet?oids=' + list.map(o => o.id).join('-'), '_blank');
+    };
+    const add = () => { if (!document.body.contains(b)) document.body.appendChild(b); };
+    add(); setInterval(add, 3000);
   })();
 
   /* ---------------- เปิดมาจากลิงก์ #pcauto=ร้าน (รองรับแบบเดิม) ---------------- */
