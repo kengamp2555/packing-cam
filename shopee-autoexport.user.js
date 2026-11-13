@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.19
+// @version      3.20
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -913,7 +913,7 @@
   document.head.appendChild(pst);
   box.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:99999;display:none;flex-direction:column;align-items:flex-end;gap:6px;font-family:system-ui,-apple-system,sans-serif';
   const btn = document.createElement('button');
-  btn.textContent = '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
+  btn.textContent = '⚡ ดึงรายการคืน → Packing Cam';
   btn.style.cssText = 'background:#ee4d2d;color:#fff;border:0;border-radius:24px;padding:14px 22px;font-size:16px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer';
   const label = document.createElement('div');
   label.style.cssText = 'background:rgba(0,0,0,.8);color:#fff;border-radius:10px;padding:8px 12px;font-size:13px;max-width:380px;line-height:1.5';
@@ -924,7 +924,7 @@
   let wasIncome = false, wasLnw = false, wasLz = false;
   setInterval(() => {
     box.style.display = onPage() || onIncome() || onLnw() || onLazada() ? 'flex' : 'none';
-    btn.textContent = onLazada() ? '📄 PDF Lazada → Drive' : onLnw() ? '🏪 ดึง LnwShop → FIN' : onIncome() ? '💰 ดึงรายรับ → FIN' : '⚡ ส่งออก ' + DAYS + ' วัน → Packing Cam';
+    btn.textContent = onLazada() ? '📄 PDF Lazada → Drive' : onLnw() ? '🏪 ดึง LnwShop → FIN' : onIncome() ? '💰 ดึงรายรับ → FIN' : '⚡ ดึงรายการคืน → Packing Cam';
     const lnw = onLnw();
     if (lnw && !wasLnw) { label.textContent = '🏪 เตรียมดึง LnwShop…'; setTimeout(() => runLnw(false), 2500); }   // เปิดหลังร้าน LnwShop → ดึงเอง
     wasLnw = lnw;
