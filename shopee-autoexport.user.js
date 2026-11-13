@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.18
+// @version      3.19
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -340,7 +340,7 @@
         st('⚡ [' + shop + '] อ่านรายการคืนสินค้า/ส่งไม่สำเร็จ…');
         const t0 = Date.now(), list = await rtList();
         const res = await api('shopeeReturnsList', { shop, list });
-        if (!res || res.error || res.busy || res.skipped) throw new Error((res && (res.error || res.skipped)) || 'ระบบกำลังนำเข้ารอบอื่นอยู่');
+        if (!res || res.error || res.busy || res.skipped) throw new Error((res && (res.error || res.skipped)) || 'LAZADA X SHOPEE DATA กำลังทำงานอื่นอยู่');
         const t = new Date().toTimeString().slice(0, 5), msg = 'อ่านจากหน้าเว็บ ' + list.length + ' รายการ (ใหม่ ' + (res.fresh || 0) + ') เวลา ' + t;
         await sset('lastOk_' + shop.toLowerCase(), Date.now());
         await api('shopeeState', { shop, state: 'done', msg }, true).catch(() => {});
