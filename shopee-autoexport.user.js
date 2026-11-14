@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.28
+// @version      3.29
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -1036,20 +1036,39 @@
     b.textContent = '🖨️ พิมพ์เรียงร้าน/ขนส่ง';
     b.title = 'เปิดหน้าพิมพ์ของออเดอร์ที่แสดงอยู่ เรียง Lazada → Shopee KENGAMP → Shopee KENGAMP2555 และในแต่ละร้าน SPX ก่อน Flash';
     b.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99999;padding:12px 18px;border:0;border-radius:12px;background:#1b7a4b;color:#fff;font:700 15px/1.2 system-ui,sans-serif;box-shadow:0 3px 10px rgba(0,0,0,.25);cursor:pointer';
+    const slug = location.pathname.split('/')[1], GO_KEY = 'pcPrintSortedGo';
+    const filtered = () => { const q = new URLSearchParams(location.search); return q.get('sheet') === 'not' && q.get('state') === 'wait_send'; };
+    const goFiltered = () => { try { sessionStorage.setItem(GO_KEY, String(Date.now())); } catch (e) { } location.href = '/' + slug + '/shipping?sheet=not&state=wait_send'; };
     b.onclick = () => {
+      if (!filtered()) { b.textContent = '⏳ กำลังกรอง "ยังไม่เคยพิมพ์ + รอจัดส่ง"…'; goFiltered(); return; }   // ยังไม่ได้กรอง → กรองให้เอง แล้วทำต่ออัตโนมัติ
       const st = store(); if (!st) { alert('ยังอ่านรายการออเดอร์ในหน้านี้ไม่ได้ – รอหน้าโหลดเสร็จแล้วกดใหม่'); return; }
       const all = Object.values(st.orders || {}).filter(o => o && o.id && o.stage === 'wait_send');
-      if (!all.length) { alert('ไม่มีออเดอร์ "รอจัดส่ง" ในหน้านี้'); return; }
+      if (!all.length) { alert('ไม่มีออเดอร์ที่ "ยังไม่เคยพิมพ์" และ "รอจัดส่ง" ตอนนี้'); return; }
       const shopRank = o => { const ch = String(o.channel || '').toLowerCase(), sh = String((o.channel_data && o.channel_data.shop_name) || '').toLowerCase();
         const i = LNW_PRINT_SHOPS.findIndex(x => x.channel === ch && x.shop === sh); return i < 0 ? LNW_PRINT_SHOPS.length : i; };
       const shipRank = o => { const i = LNW_PRINT_SHIP.findIndex(re => re.test(o.shipping_type_text || '')); return i < 0 ? LNW_PRINT_SHIP.length : i; };
       const list = all.slice().sort((a, b) => shopRank(a) - shopRank(b) || shipRank(a) - shipRank(b) || Number(a.id) - Number(b.id));
       const sum = {}; list.forEach(o => { const s = (LNW_PRINT_SHOPS[shopRank(o)] || { label: (o.channel || '?') + ' ' + ((o.channel_data && o.channel_data.shop_name) || '') }).label, k = s + ' · ' + (String(o.shipping_type_text || '-').replace(/^Pickup:\s*/i, '').split(',')[0]); sum[k] = (sum[k] || 0) + 1; });
       const total = Number(st.orders_num) || 0, more = total > all.length ? '\n\n⚠️ หน้านี้โหลดไว้ ' + Object.keys(st.orders || {}).length + ' จาก ' + total + ' ออเดอร์ – เพิ่มจำนวนต่อหน้าก่อน ถ้าอยากพิมพ์ครบ' : '';
-      if (!confirm('พิมพ์ ' + list.length + ' ออเดอร์ (เฉพาะที่แสดงอยู่ตามตัวกรอง) เรียงตามนี้:\n\n' + Object.keys(sum).map(k => '• ' + k + ' — ' + sum[k]).join('\n') + more + '\n\nแนะนำ: ใช้ตัวกรอง "ยังไม่เคยพิมพ์" + "รอจัดส่ง" ก่อนกด')) return;
-      const slug = location.pathname.split('/')[1];
-      window.open('/' + slug + '/shipping/prepare_print_sheet?oids=' + list.map(o => o.id).join('-'), '_blank');
+      if (!confirm('พิมพ์ ' + list.length + ' ออเดอร์ (ยังไม่เคยพิมพ์ + รอจัดส่ง) เรียงตามนี้:\n\n' + Object.keys(sum).map(k => '• ' + k + ' — ' + sum[k]).join('\n') + more)) return;
+      const url = '/' + slug + '/shipping/prepare_print_sheet?oids=' + list.map(o => o.id).join('-');
+      const w = window.open(url, '_blank'); if (!w) location.href = url;   // เปิดแท็บใหม่ไม่ได้ (บล็อกป๊อปอัป ตอนทำต่ออัตโนมัติ) → เปิดในแท็บนี้แทน
     };
+    // มาจากการกดปุ่มตอนยังไม่กรอง → รอรายการโหลดเสร็จ แล้วทำต่อให้เอง
+    (async () => {
+      let go = 0; try { go = +sessionStorage.getItem(GO_KEY) || 0; sessionStorage.removeItem(GO_KEY); } catch (e) { }
+      if (!go || Date.now() - go > 60000 || !filtered()) return;
+      b.textContent = '⏳ กำลังโหลดออเดอร์ที่ยังไม่เคยพิมพ์…';
+      let st = null, stable = 0, last = -1;
+      for (let i = 0; i < 60; i++) {                          // ≤ 30 วินาที: รอให้จำนวนออเดอร์นิ่ง 2 รอบติด
+        await new Promise(r => setTimeout(r, 500));
+        st = store(); if (!st || st.now_xhr) { stable = 0; continue; }
+        const n = Object.keys(st.orders || {}).length + '|' + st.orders_num;
+        stable = n === last ? stable + 1 : 0; last = n; if (stable >= 2 && i >= 4 && (Object.keys(st.orders || {}).length || i >= 12)) break;   // รายการว่างรอนานหน่อย (หน้าอาจยังไม่เริ่มโหลด)
+      }
+      b.textContent = '🖨️ พิมพ์เรียงร้าน/ขนส่ง';
+      b.onclick();
+    })();
     const add = () => { if (!document.body.contains(b)) document.body.appendChild(b); };
     add(); setInterval(add, 3000);
   })();
