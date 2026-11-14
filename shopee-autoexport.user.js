@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.35
+// @version      3.36
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2240,7 +2240,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     let sortPos = false; try { sortPos = localStorage.getItem('pcPosSort') === '1'; } catch (e) { }
     noteBtn.onclick = () => { sortPos = !sortPos; try { localStorage.setItem('pcPosSort', sortPos ? '1' : '0'); } catch (e) { } apply(); };
     // ⚙ ตั้งค่าใบจัดสินค้า (จำไว้ในเครื่อง): ขนาดหัวใบ · กรอบแดงหน้าหลายหน้า/ตัวเลือกสินค้า · ข้อความท้ายใบ
-    const PS_DEF = { titleSize: 15, imgInCode: true, qtySize: 0, qtyBold: true, boxMulti: true, boxVariant: true, footText: '', footSize: 12 };
+    const PS_DEF = { titleSize: 15, imgInCode: true, qtySize: 0, qtyBold: true, boxMulti: true, boxVariant: true, footText: '', footSize: 12, qrWeb: false, qrWebUrl: 'https://kengamp.lnwshop.com', qrLine: false, lineId: '@kengamp', footQr: 16 };
     let ps = Object.assign({}, PS_DEF); try { Object.assign(ps, JSON.parse(localStorage.getItem('pcPickSet') || '{}')); } catch (e) { }
     const psCss = document.head.appendChild(document.createElement('style'));
     const psApply = () => {
@@ -2249,7 +2249,9 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
         (ps.boxMulti ? '.pagecount.pc-multi{border:2px solid #e00;border-radius:4px;padding:1px 6px;font-weight:700;color:#000}' : '') +
         (ps.boxVariant ? '.child_name{display:inline-block!important;width:auto!important;max-width:100%;box-sizing:border-box;border:2px solid #e00;border-radius:4px;padding:0 6px 0 2px;margin-top:2px}' : '') +
         '.td.code img.pc-img{display:block;width:100%;height:auto;margin:0}.pc-codebox{margin:0 0 2px}.pc-codebox .pc-pos{display:inline;margin-right:6px}.pc-codebox span{color:#333}' +
-        '.pc-foot{margin-top:2mm;border:1.5px dashed #000;border-radius:2mm;padding:1.5mm 2mm;text-align:center;font-weight:700;line-height:1.35;white-space:pre-wrap;font-size:' + (+ps.footSize || 12) + 'px}' +
+        '.pc-foot{margin-top:2mm;border:1.5px dashed #000;border-radius:2mm;padding:1.5mm 2mm;display:flex;align-items:center;gap:2mm}' +
+        '.pc-foot .ftx{flex:1;text-align:center;font-weight:700;line-height:1.35;white-space:pre-wrap;font-size:' + (+ps.footSize || 12) + 'px}' +
+        '.pc-foot .fqr{display:flex;gap:2mm}.pc-foot figure{margin:0;text-align:center;font:700 8px/1.2 sans-serif}.pc-foot figure svg{display:block;width:' + (+ps.footQr || 16) + 'mm;height:' + (+ps.footQr || 16) + 'mm;margin:0 auto 1px}' +
         '#pc-ps{margin-top:8px;background:#fff;color:#111;border-radius:8px;padding:8px 10px;font:500 13px/1.5 system-ui,sans-serif;width:300px}#pc-ps label{display:flex;gap:6px;align-items:center;margin:4px 0}#pc-ps input[type=number]{width:60px}#pc-ps textarea{width:100%;box-sizing:border-box;font:inherit}';
     };
     psApply();
@@ -2265,7 +2267,10 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
         '<label><input type="checkbox" data-k="boxMulti"> กรอบแดง "OID … หน้า x/y" เมื่อใบยาวหลายหน้า</label>' +
         '<label><input type="checkbox" data-k="boxVariant"> กรอบแดงตัวเลือกสินค้า (⊳ …)</label>' +
         '<div style="margin-top:6px;font-weight:700">ข้อความท้ายใบ (ว่าง = ไม่แสดง)</div><textarea rows="3" data-k="footText" placeholder="เช่น โปรโมชั่นลด 10% เมื่อสั่งซื้อผ่าน kengamp.lnwshop.com ติดต่อ Line : @kengamp"></textarea>' +
-        '<label>ขนาดข้อความท้ายใบ <input type="number" min="8" max="30" data-k="footSize"> px</label>';
+        '<label>ขนาดข้อความท้ายใบ <input type="number" min="8" max="30" data-k="footSize"> px</label>' +
+        '<label><input type="checkbox" data-k="qrWeb"> QR เว็บร้าน <input type="text" data-k="qrWebUrl" style="flex:1;min-width:0"></label>' +
+        '<label><input type="checkbox" data-k="qrLine"> QR เพิ่มเพื่อน LINE <input type="text" data-k="lineId" style="width:110px"></label>' +
+        '<label>ขนาด QR ท้ายใบ <input type="number" min="10" max="30" data-k="footQr"> มม.</label>';
       box.querySelectorAll('[data-k]').forEach(el => {
         const k = el.dataset.k;
         if (el.type === 'checkbox') { el.checked = !!ps[k]; el.onchange = () => { ps[k] = el.checked; psSave(); }; }
@@ -2316,8 +2321,31 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
           const pcn = pg.querySelector('.pagecount');   // ใบยาวหลายหน้า → กรอบแดง
           if (pcn) { const mm = /หน้า\s*\d+\s*\/\s*(\d+)/.exec(pcn.textContent); pcn.classList.toggle('pc-multi', !!(mm && +mm[1] > 1)); }
           const lz = pg.querySelector('.last-zone');   // ข้อความท้ายใบ (หน้าสุดท้ายของออเดอร์)
-          if (lz && lz.querySelector('.itemstotal')) { let ft = lz.querySelector(':scope > .pc-foot'); const tx = String(ps.footText || '').trim();
-            if (!tx) { if (ft) ft.remove(); } else { if (!ft) { ft = document.createElement('div'); ft.className = 'pc-foot'; lz.appendChild(ft); } if (ft.textContent !== tx) ft.textContent = tx; } }
+          if (lz && lz.querySelector('.itemstotal')) {
+            let ft = lz.querySelector(':scope > .pc-foot'); const tx = String(ps.footText || '').trim();
+            const qrs = [];
+            if (ps.qrWeb && String(ps.qrWebUrl || '').trim()) { let u = String(ps.qrWebUrl).trim(); if (!/^https?:\/\//i.test(u)) u = 'https://' + u; qrs.push([u, u.replace(/^https?:\/\//i, '').replace(/\/$/, '')]); }
+            if (ps.qrLine && String(ps.lineId || '').trim()) { const id = String(ps.lineId).trim().replace(/^@?/, '@'); qrs.push(['https://line.me/R/ti/p/' + encodeURIComponent(id), 'LINE ' + id]); }   // ลิงก์เพิ่มเพื่อน LINE OA
+            const key = tx + '|' + JSON.stringify(qrs);
+            if (!tx && !qrs.length) { if (ft) ft.remove(); }
+            else {
+              if (!ft) { ft = document.createElement('div'); ft.className = 'pc-foot'; lz.appendChild(ft); }
+              if (ft.dataset.k !== key) {
+                ft.dataset.k = key; ft.textContent = '';
+                const d0 = ft.appendChild(document.createElement('div')); d0.className = 'ftx'; d0.textContent = tx;
+                if (qrs.length && window.LZL_QR) {
+                  const wrap = ft.appendChild(document.createElement('div')); wrap.className = 'fqr';
+                  qrs.forEach(([url, cap]) => {
+                    const mx = window.LZL_QR(url, 'M'), N = mx.length + 4, NS = 'http://www.w3.org/2000/svg', sv = document.createElementNS(NS, 'svg');
+                    sv.setAttribute('viewBox', '0 0 ' + N + ' ' + N); sv.setAttribute('shape-rendering', 'crispEdges');
+                    let d = ''; mx.forEach((row, r) => row.forEach((v, c) => { if (v) d += 'M' + (c + 2) + ' ' + (r + 2) + 'h1v1h-1z'; }));
+                    const pa = document.createElementNS(NS, 'path'); pa.setAttribute('d', d); sv.appendChild(pa);
+                    const fg = wrap.appendChild(document.createElement('figure')); fg.appendChild(sv); fg.appendChild(document.createTextNode(cap));
+                  });
+                }
+              }
+            }
+          }
           const cr = pg.querySelector('.inforow.customer');
           if (cr) { const t = cr.querySelector('.title'), v = cr.querySelector('.info');
             if (t && t.textContent !== 'ช่องทางการสั่งซื้อ') t.textContent = 'ช่องทางการสั่งซื้อ';
