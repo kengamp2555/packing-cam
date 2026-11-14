@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.34
+// @version      3.35
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2240,14 +2240,15 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     let sortPos = false; try { sortPos = localStorage.getItem('pcPosSort') === '1'; } catch (e) { }
     noteBtn.onclick = () => { sortPos = !sortPos; try { localStorage.setItem('pcPosSort', sortPos ? '1' : '0'); } catch (e) { } apply(); };
     // ⚙ ตั้งค่าใบจัดสินค้า (จำไว้ในเครื่อง): ขนาดหัวใบ · กรอบแดงหน้าหลายหน้า/ตัวเลือกสินค้า · ข้อความท้ายใบ
-    const PS_DEF = { titleSize: 15, qtySize: 0, qtyBold: true, boxMulti: true, boxVariant: true, footText: '', footSize: 12 };
+    const PS_DEF = { titleSize: 15, imgInCode: true, qtySize: 0, qtyBold: true, boxMulti: true, boxVariant: true, footText: '', footSize: 12 };
     let ps = Object.assign({}, PS_DEF); try { Object.assign(ps, JSON.parse(localStorage.getItem('pcPickSet') || '{}')); } catch (e) { }
     const psCss = document.head.appendChild(document.createElement('style'));
     const psApply = () => {
       psCss.textContent = '.header h1{font-size:' + (+ps.titleSize || 15) + 'px!important;line-height:1.2!important}' +
         '.tr.item .td.quantity{' + (+ps.qtySize > 0 ? 'font-size:' + (+ps.qtySize) + 'px!important;line-height:1.1!important;' : '') + (ps.qtyBold ? 'font-weight:800!important;' : '') + '}' +
         (ps.boxMulti ? '.pagecount.pc-multi{border:2px solid #e00;border-radius:4px;padding:1px 6px;font-weight:700;color:#000}' : '') +
-        (ps.boxVariant ? '.child_name{display:inline-block;border:2px solid #e00;border-radius:4px;padding:0 5px 0 2px;margin-top:2px}' : '') +
+        (ps.boxVariant ? '.child_name{display:inline-block!important;width:auto!important;max-width:100%;box-sizing:border-box;border:2px solid #e00;border-radius:4px;padding:0 6px 0 2px;margin-top:2px}' : '') +
+        '.td.code img.pc-img{display:block;width:100%;height:auto;margin:0}.pc-codebox{margin:0 0 2px}.pc-codebox .pc-pos{display:inline;margin-right:6px}.pc-codebox span{color:#333}' +
         '.pc-foot{margin-top:2mm;border:1.5px dashed #000;border-radius:2mm;padding:1.5mm 2mm;text-align:center;font-weight:700;line-height:1.35;white-space:pre-wrap;font-size:' + (+ps.footSize || 12) + 'px}' +
         '#pc-ps{margin-top:8px;background:#fff;color:#111;border-radius:8px;padding:8px 10px;font:500 13px/1.5 system-ui,sans-serif;width:300px}#pc-ps label{display:flex;gap:6px;align-items:center;margin:4px 0}#pc-ps input[type=number]{width:60px}#pc-ps textarea{width:100%;box-sizing:border-box;font:inherit}';
     };
@@ -2260,6 +2261,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
       box.innerHTML = '<label>ขนาดหัวใบ (ใบจัดสินค้า / เลขพัสดุ) <input type="number" min="10" max="40" data-k="titleSize"> px</label>' +
         '<label>ขนาดตัวเลขจำนวน (Qty) <input type="number" min="0" max="40" data-k="qtySize"> px <span style="color:#888">(0 = เดิม)</span></label>' +
         '<label><input type="checkbox" data-k="qtyBold"> ตัวเลขจำนวนตัวหนา</label>' +
+        '<label><input type="checkbox" data-k="imgInCode"> ย้ายรูปไปช่องแรก + รหัสไว้บนชื่อสินค้า <span style="color:#888">(เปลี่ยนแล้วเปิดหน้าใหม่)</span></label>' +
         '<label><input type="checkbox" data-k="boxMulti"> กรอบแดง "OID … หน้า x/y" เมื่อใบยาวหลายหน้า</label>' +
         '<label><input type="checkbox" data-k="boxVariant"> กรอบแดงตัวเลือกสินค้า (⊳ …)</label>' +
         '<div style="margin-top:6px;font-weight:700">ข้อความท้ายใบ (ว่าง = ไม่แสดง)</div><textarea rows="3" data-k="footText" placeholder="เช่น โปรโมชั่นลด 10% เมื่อสั่งซื้อผ่าน kengamp.lnwshop.com ติดต่อ Line : @kengamp"></textarea>' +
@@ -2272,6 +2274,20 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     };
     const posErr = !map; if (!map) map = {};   // ดึงรหัส POS ไม่ได้ → ยังแก้หัวใบ/เรียงได้ แต่บอกในป้าย
     const cmp = (a, b) => (a ? 0 : 1) - (b ? 0 : 1) || String(a).localeCompare(String(b), 'en', { numeric: true });
+    // ย้ายรูปสินค้าไปช่องแรก (หัวข้อ "รูป") · รหัส POS + รหัสสินค้าเดิม ขึ้นไปอยู่บนชื่อสินค้า (ทำครั้งเดียวต่อแถว · ปิดใน ⚙ แล้วเปิดหน้าใหม่)
+    function pickLayout(tr, td) {
+      if (tr.dataset.pcLay === '1') return tr.querySelector('.pc-codebox') || td;
+      if (!ps.imgInCode) return td;
+      const desc = tr.querySelector('.td.description'), pn = desc && (desc.querySelector('.proname') || desc);
+      if (!pn) return td;
+      const img = desc.querySelector('img');
+      const cb = document.createElement('div'); cb.className = 'pc-codebox';
+      [...td.childNodes].forEach(n => cb.appendChild(n));
+      pn.insertBefore(cb, pn.firstChild);
+      if (img) { img.classList.add('pc-img'); td.appendChild(img); }
+      tr.dataset.pcLay = '1';
+      return cb;
+    }
     let busy = false;
     const apply = () => {
       if (busy) return; busy = true;
@@ -2307,6 +2323,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
             if (t && t.textContent !== 'ช่องทางการสั่งซื้อ') t.textContent = 'ช่องทางการสั่งซื้อ';
             if (v && v.textContent !== oi.channel) v.textContent = oi.channel; }
         });
+        if (ps.imgInCode) document.querySelectorAll('.itemslist.thead .th.code').forEach(th => { if (th.dataset.pc !== '1') { th.dataset.pc = '1'; th.innerHTML = 'รูป<br>Image'; } });
         let hit = 0, miss = 0, seq = 0;
         const groups = new Map();   // ออเดอร์เดียวกันที่ยาวหลายหน้า (OID #49954 หน้า 1/2, 2/2) → เรียง/นับเลขต่อกันทั้งออเดอร์
         document.querySelectorAll('.itemslist').forEach((list, li) => {
@@ -2319,15 +2336,18 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
             if (!tr.dataset.pcIdx) tr.dataset.pcIdx = String(seq);   // ลำดับเดิมของ LnwShop (จำครั้งแรก)
             seq++;
             const td = tr.querySelector('.td.code'); if (!td) return;
-            let tag = td.querySelector('.pc-pos');
-            const img = tr.querySelector('.td.description img'), pn = tr.querySelector('.proname') || tr.querySelector('.td.description');
-            const raw = (td.querySelector('span:not(.pc-pos)') || td).textContent, m = /^\s*(\d+)\s*\//.exec(raw), src = img && img.getAttribute('src');
-            const rowName = pn ? pn.textContent : '', it = byCode[skey(raw)] || byName[nkey(rowName)] || (src && thumbN[src] === 1 ? byThumb[src] : null);
+            // อ่านค่าเดิมครั้งแรก (ก่อนย้ายรูป/รหัส) แล้วจำไว้ในแถว
+            if (tr.dataset.pcRaw == null) { const pn0 = tr.querySelector('.proname') || tr.querySelector('.td.description'); tr.dataset.pcRaw = (td.querySelector('span:not(.pc-pos)') || td).textContent; tr.dataset.pcName = pn0 ? pn0.textContent : ''; }
+            const box = pickLayout(tr, td);   // ที่วางรหัส POS: บนชื่อสินค้า (ถ้าย้ายรูปไปช่องแรก) หรือช่องรหัสเดิม
+            let tag = box.querySelector(':scope > .pc-pos');
+            const img = tr.querySelector('img.pc-img') || tr.querySelector('.td.description img');
+            const raw = tr.dataset.pcRaw, m = /^\s*(\d+)\s*\//.exec(raw), src = img && img.getAttribute('src');
+            const rowName = tr.dataset.pcName || '', it = byCode[skey(raw)] || byName[nkey(rowName)] || (src && thumbN[src] === 1 ? byThumb[src] : null);
             const pid = (it && it.pid) || (m ? m[1] : '');
             // 1) SKU แพลตฟอร์ม (คอลัมน์ BI) → 2) pid LnwShop (AO) → 3) ชื่อสินค้า
             let code = skus[skey(raw)] || skus[skey(it && it.code)] || (pid ? (map[pid] || '') : '');
             if (!code) [rowName].concat(it ? it.names : []).some(n => (code = names[nkey(n)] || '') !== '');   // ไม่มีรหัส LnwShop ใน POS → เทียบชื่อ
-            if (!tag) { tag = document.createElement('div'); td.insertBefore(tag, td.firstChild); }
+            if (!tag) { tag = document.createElement('div'); box.insertBefore(tag, box.firstChild); }
             if (tag.dataset.pid !== pid + '|' + code) { tag.dataset.pid = pid + '|' + code; tag.className = 'pc-pos' + (code ? '' : ' none'); tag.textContent = code || '—'; }
             tr.dataset.pcCode = code; code ? hit++ : miss++;
           });
@@ -2349,7 +2369,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
         document.querySelectorAll('.page').forEach(pg => {
           const pane = pg.querySelector(':scope > .pane'); if (!pane) return;
           if (pane.style.transform) pane.style.transform = '';
-          const H = pg.clientHeight, h = pane.scrollHeight;
+          const H = pane.clientHeight, h = pane.scrollHeight;   // พื้นที่จริง = กล่อง .pane (หน้าเว้นขอบไว้แล้ว)
           if (H && h > H + 1) { const sc = Math.max(0.6, (H - 2) / h); pane.style.transformOrigin = '50% 0'; pane.style.transform = 'scale(' + sc.toFixed(3) + ')'; }
         });
         const nt = (posErr ? '⚠️ ดึงรหัส POS ไม่ได้: ' + err + ' · ' : '') + '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + (sortPos ? ' · เรียงตามรหัส POS' : ' · เรียงตามใบปะหน้า');
@@ -2359,6 +2379,8 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     };
     const quiet = n => { const e = n && (n.nodeType === 1 ? n : n.parentElement); return !!(e && e.closest && e.closest('.issuedate, #pc-pos-note')); };   // นาฬิกาเวลาพิมพ์เดินทุกวินาที → ไม่ต้องคำนวณใหม่
     let t = 0; new MutationObserver(ms => { if (ms.every(m => quiet(m.target))) return; clearTimeout(t); t = setTimeout(apply, 250); }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    document.addEventListener('load', e => { if (e.target && e.target.tagName === 'IMG') { clearTimeout(t); t = setTimeout(apply, 250); } }, true);   // รูปโหลดเสร็จ → ความสูงเปลี่ยน → ย่อหน้าใหม่ (ข้อความท้ายใบไม่ถูกตัด)
+    window.addEventListener('beforeprint', () => { busy = false; apply(); });
     apply();
   })();
 
