@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.32
+// @version      3.34
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2232,13 +2232,44 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     } catch (e) { console.warn('[Packing Cam รหัส POS] อ่านข้อมูลออเดอร์ไม่ได้', e); }
     const css = document.createElement('style');
     css.textContent = '.pc-pos{font-weight:800;font-size:1.1em;line-height:1.15;letter-spacing:-.2px;color:#000;margin-bottom:3px;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.pc-pos.none{font-weight:600;font-size:.85em;color:#999}' +
-      '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}.first-zone{position:relative}.pc-qr{position:absolute;right:0;top:0;width:22mm;height:22mm;display:block;z-index:2}#pc-pos-note button{margin-left:8px;border:0;border-radius:8px;padding:4px 10px;font:700 12px system-ui,sans-serif;cursor:pointer;background:#fff;color:#1b7a4b}@media print{#pc-pos-note{display:none!important}}';
+      '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}.first-zone{position:relative}.pc-qr{position:absolute;right:0;top:0;width:22mm;height:22mm;display:block;z-index:2}#pc-pos-note button{margin-left:6px;border:0;border-radius:8px;padding:4px 10px;font:700 12px system-ui,sans-serif;cursor:pointer;background:#fff;color:#1b7a4b}@media print{#pc-pos-note{display:none!important}}';
     document.head.appendChild(css);
     const note = document.createElement('div'); note.id = 'pc-pos-note'; document.body.appendChild(note);
     const noteTxt = note.appendChild(document.createElement('span')), noteBtn = note.appendChild(document.createElement('button'));
     // ลำดับรายการ: ค่าเริ่มต้น = ตามใบปะหน้า (ลำดับเดิมของ LnwShop ตรงกับใบปะหน้า Shopee/Lazada) · กดสลับเป็นเรียงตามรหัส POS ได้ (จำไว้ในเครื่อง)
     let sortPos = false; try { sortPos = localStorage.getItem('pcPosSort') === '1'; } catch (e) { }
     noteBtn.onclick = () => { sortPos = !sortPos; try { localStorage.setItem('pcPosSort', sortPos ? '1' : '0'); } catch (e) { } apply(); };
+    // ⚙ ตั้งค่าใบจัดสินค้า (จำไว้ในเครื่อง): ขนาดหัวใบ · กรอบแดงหน้าหลายหน้า/ตัวเลือกสินค้า · ข้อความท้ายใบ
+    const PS_DEF = { titleSize: 15, qtySize: 0, qtyBold: true, boxMulti: true, boxVariant: true, footText: '', footSize: 12 };
+    let ps = Object.assign({}, PS_DEF); try { Object.assign(ps, JSON.parse(localStorage.getItem('pcPickSet') || '{}')); } catch (e) { }
+    const psCss = document.head.appendChild(document.createElement('style'));
+    const psApply = () => {
+      psCss.textContent = '.header h1{font-size:' + (+ps.titleSize || 15) + 'px!important;line-height:1.2!important}' +
+        '.tr.item .td.quantity{' + (+ps.qtySize > 0 ? 'font-size:' + (+ps.qtySize) + 'px!important;line-height:1.1!important;' : '') + (ps.qtyBold ? 'font-weight:800!important;' : '') + '}' +
+        (ps.boxMulti ? '.pagecount.pc-multi{border:2px solid #e00;border-radius:4px;padding:1px 6px;font-weight:700;color:#000}' : '') +
+        (ps.boxVariant ? '.child_name{display:inline-block;border:2px solid #e00;border-radius:4px;padding:0 5px 0 2px;margin-top:2px}' : '') +
+        '.pc-foot{margin-top:2mm;border:1.5px dashed #000;border-radius:2mm;padding:1.5mm 2mm;text-align:center;font-weight:700;line-height:1.35;white-space:pre-wrap;font-size:' + (+ps.footSize || 12) + 'px}' +
+        '#pc-ps{margin-top:8px;background:#fff;color:#111;border-radius:8px;padding:8px 10px;font:500 13px/1.5 system-ui,sans-serif;width:300px}#pc-ps label{display:flex;gap:6px;align-items:center;margin:4px 0}#pc-ps input[type=number]{width:60px}#pc-ps textarea{width:100%;box-sizing:border-box;font:inherit}';
+    };
+    psApply();
+    const psSave = () => { try { localStorage.setItem('pcPickSet', JSON.stringify(ps)); } catch (e) { } psApply(); apply(); };
+    const psBtn = note.appendChild(document.createElement('button')); psBtn.textContent = '⚙';
+    psBtn.onclick = () => {
+      let box = document.getElementById('pc-ps'); if (box) { box.remove(); return; }
+      box = note.appendChild(document.createElement('div')); box.id = 'pc-ps';
+      box.innerHTML = '<label>ขนาดหัวใบ (ใบจัดสินค้า / เลขพัสดุ) <input type="number" min="10" max="40" data-k="titleSize"> px</label>' +
+        '<label>ขนาดตัวเลขจำนวน (Qty) <input type="number" min="0" max="40" data-k="qtySize"> px <span style="color:#888">(0 = เดิม)</span></label>' +
+        '<label><input type="checkbox" data-k="qtyBold"> ตัวเลขจำนวนตัวหนา</label>' +
+        '<label><input type="checkbox" data-k="boxMulti"> กรอบแดง "OID … หน้า x/y" เมื่อใบยาวหลายหน้า</label>' +
+        '<label><input type="checkbox" data-k="boxVariant"> กรอบแดงตัวเลือกสินค้า (⊳ …)</label>' +
+        '<div style="margin-top:6px;font-weight:700">ข้อความท้ายใบ (ว่าง = ไม่แสดง)</div><textarea rows="3" data-k="footText" placeholder="เช่น โปรโมชั่นลด 10% เมื่อสั่งซื้อผ่าน kengamp.lnwshop.com ติดต่อ Line : @kengamp"></textarea>' +
+        '<label>ขนาดข้อความท้ายใบ <input type="number" min="8" max="30" data-k="footSize"> px</label>';
+      box.querySelectorAll('[data-k]').forEach(el => {
+        const k = el.dataset.k;
+        if (el.type === 'checkbox') { el.checked = !!ps[k]; el.onchange = () => { ps[k] = el.checked; psSave(); }; }
+        else { el.value = ps[k]; el.oninput = () => { ps[k] = el.type === 'number' ? Number(el.value) : el.value.slice(0, 400); psSave(); }; }
+      });
+    };
     const posErr = !map; if (!map) map = {};   // ดึงรหัส POS ไม่ได้ → ยังแก้หัวใบ/เรียงได้ แต่บอกในป้าย
     const cmp = (a, b) => (a ? 0 : 1) - (b ? 0 : 1) || String(a).localeCompare(String(b), 'en', { numeric: true });
     let busy = false;
@@ -2266,6 +2297,11 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
               fz.appendChild(qv);
             }
           }
+          const pcn = pg.querySelector('.pagecount');   // ใบยาวหลายหน้า → กรอบแดง
+          if (pcn) { const mm = /หน้า\s*\d+\s*\/\s*(\d+)/.exec(pcn.textContent); pcn.classList.toggle('pc-multi', !!(mm && +mm[1] > 1)); }
+          const lz = pg.querySelector('.last-zone');   // ข้อความท้ายใบ (หน้าสุดท้ายของออเดอร์)
+          if (lz && lz.querySelector('.itemstotal')) { let ft = lz.querySelector(':scope > .pc-foot'); const tx = String(ps.footText || '').trim();
+            if (!tx) { if (ft) ft.remove(); } else { if (!ft) { ft = document.createElement('div'); ft.className = 'pc-foot'; lz.appendChild(ft); } if (ft.textContent !== tx) ft.textContent = tx; } }
           const cr = pg.querySelector('.inforow.customer');
           if (cr) { const t = cr.querySelector('.title'), v = cr.querySelector('.info');
             if (t && t.textContent !== 'ช่องทางการสั่งซื้อ') t.textContent = 'ช่องทางการสั่งซื้อ';
@@ -2308,6 +2344,13 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
             if (want.some((tr, i) => slots[li][i] !== tr)) want.forEach(tr => l.insertBefore(tr, anchors[li] && anchors[li].parentNode === l ? anchors[li] : null));   // ย้ายเฉพาะเมื่อลำดับยังไม่ตรง (กันวนไม่รู้จบกับ MutationObserver)
           });
           sorted.forEach((tr, i) => { tr.style.order = ''; const n = tr.querySelector('.td.number'); if (n && n.textContent !== (i + 1) + '.') n.textContent = (i + 1) + '.'; });
+        });
+        // เนื้อหาเกินหน้า (หัวใบใหญ่ขึ้น / ข้อความท้ายใบ / รหัส POS) → ย่อทั้งหน้าให้พอดี ไม่ให้ถูกตัดตอนพิมพ์
+        document.querySelectorAll('.page').forEach(pg => {
+          const pane = pg.querySelector(':scope > .pane'); if (!pane) return;
+          if (pane.style.transform) pane.style.transform = '';
+          const H = pg.clientHeight, h = pane.scrollHeight;
+          if (H && h > H + 1) { const sc = Math.max(0.6, (H - 2) / h); pane.style.transformOrigin = '50% 0'; pane.style.transform = 'scale(' + sc.toFixed(3) + ')'; }
         });
         const nt = (posErr ? '⚠️ ดึงรหัส POS ไม่ได้: ' + err + ' · ' : '') + '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + (sortPos ? ' · เรียงตามรหัส POS' : ' · เรียงตามใบปะหน้า');
         const ncls = posErr ? 'err' : ''; if (note.className !== ncls) note.className = ncls; if (noteTxt.textContent !== nt) noteTxt.textContent = nt;
