@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.36
+// @version      3.37
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2418,7 +2418,8 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
   const LNW_PRINT_SHOPS = [                                    // ลำดับร้าน (ช่องทาง + ชื่อร้านใน LnwShop ไม่สนตัวพิมพ์เล็ก/ใหญ่)
     { channel: 'lazada', shop: 'kengamp2555', label: 'Lazada KengAmp2555' },
     { channel: 'shopee', shop: 'kengamp', label: 'Shopee KENGAMP' },
-    { channel: 'shopee', shop: 'kengamp2555', label: 'Shopee KENGAMP2555' }
+    { channel: 'shopee', shop: 'kengamp2555', label: 'Shopee KENGAMP2555' },
+    { channel: 'lnwshop|web', shop: '*', label: 'หน้าร้าน LnwShop' }   // ออเดอร์จากเว็บร้าน (channel = lnwshop) · shop '*' = ไม่สนชื่อร้าน
   ];
   const LNW_PRINT_SHIP = [/SPX/i, /Flash/i];                   // ลำดับขนส่งในแต่ละร้าน (ที่เหลือต่อท้าย)
   (function lnwPrintSorted() {
@@ -2437,7 +2438,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
       const all = Object.values(st.orders || {}).filter(o => o && o.id && o.stage === 'wait_send');
       if (!all.length) { alert('ไม่มีออเดอร์ที่ "ยังไม่เคยพิมพ์" และ "รอจัดส่ง" ตอนนี้'); return; }
       const shopRank = o => { const ch = String(o.channel || '').toLowerCase(), sh = String((o.channel_data && o.channel_data.shop_name) || '').toLowerCase();
-        const i = LNW_PRINT_SHOPS.findIndex(x => x.channel === ch && x.shop === sh); return i < 0 ? LNW_PRINT_SHOPS.length : i; };
+        const i = LNW_PRINT_SHOPS.findIndex(x => x.channel.split('|').includes(ch) && (x.shop === '*' || x.shop === sh)); return i < 0 ? LNW_PRINT_SHOPS.length : i; };
       const shipRank = o => { const i = LNW_PRINT_SHIP.findIndex(re => re.test(o.shipping_type_text || '')); return i < 0 ? LNW_PRINT_SHIP.length : i; };
       const list = all.slice().sort((a, b) => shopRank(a) - shopRank(b) || shipRank(a) - shipRank(b) || Number(a.id) - Number(b.id));
       const sum = {}; list.forEach(o => { const s = (LNW_PRINT_SHOPS[shopRank(o)] || { label: (o.channel || '?') + ' ' + ((o.channel_data && o.channel_data.shop_name) || '') }).label, k = s + ' · ' + (String(o.shipping_type_text || '-').replace(/^Pickup:\s*/i, '').split(',')[0]); sum[k] = (sum[k] || 0) + 1; });
