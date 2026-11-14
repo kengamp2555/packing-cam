@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.29
+// @version      3.30
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -948,13 +948,19 @@
     const skey = t => String(t || '').toLowerCase().replace(/\s+/g, '').slice(0, 160);   // = posSkuKey_ ใน Code.gs
     // ชื่อ/รหัส LnwShop ของสินค้าแต่ละบรรทัด: อ่านจากข้อมูลออเดอร์ที่ฝังในหน้านี้ (ช่อง "รหัสสินค้า" บางตัวเป็นข้อความ ไม่ใช่รหัส LnwShop)
     const nkey = t => String(t || '').toLowerCase().replace(/\(มีตัวเลือก\)/g, '').replace(/\[[^\]]*\]/g, '').replace(/[\s\-_.,\/()⊳:]+/g, '').slice(0, 160);   // = posNameKey_ ใน Code.gs
-    const byThumb = {}, byName = {}, byCode = {}, thumbN = {};
+    const byThumb = {}, byName = {}, byCode = {}, thumbN = {}, ordInfo = {};
     try {
       const h = await fetch(location.href, { credentials: 'include' }).then(r => r.text());
       const i0 = h.indexOf('var orders = [{'); if (i0 >= 0) {
         let i = h.indexOf('[', i0), d = 0, q = '', j = i;
         for (; j < h.length; j++) { const c = h[j]; if (q) { if (c === '\\') j++; else if (c === q) q = ''; continue; } if (c === '"' || c === "'") q = c; else if (c === '[' || c === '{') d++; else if (c === ']' || c === '}') { d--; if (!d) break; } }
-        JSON.parse(h.slice(i, j + 1)).forEach(o => (o.product_items || []).forEach(it => {
+        const ordersData = JSON.parse(h.slice(i, j + 1));
+        ordersData.forEach(o => {   // หัวใบจัดของ: เลขพัสดุ + ช่องทางการสั่งซื้อ (ร้าน)
+          const cd = o.channel_data || {}, track = ((o.trackcodes || []).map(t => t && (t.code_text || t.code)).filter(Boolean)[0]) || '';
+          const ch = cd.name || o.channel || '', shop = cd.shop_name || '';
+          ordInfo[String(o.id)] = { track, channel: ch ? ch + (shop ? ' (' + shop + ')' : '') : 'หน้าร้าน' };
+        });
+        ordersData.forEach(o => (o.product_items || []).forEach(it => {
           const pid = String((it.spec && it.spec.product_id) || (it.product && it.product.id) || ''), x = { pid, code: (it.product && it.product.code) || '', names: [it.name, it.product && it.product.title, it.product && it.product.name] };
           if (it.thumbnail) { byThumb[it.thumbnail] = x; thumbN[it.thumbnail] = (thumbN[it.thumbnail] || 0) + 1; }   // ตัวเลือกของสินค้าเดียวกันใช้รูปเดียวกัน → ใช้รูปจับคู่ได้เฉพาะรูปที่ไม่ซ้ำ
           if (x.code) { const kc = skey(x.code); if (kc && !byCode[kc]) byCode[kc] = x; }
@@ -967,12 +973,25 @@
       '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}@media print{#pc-pos-note{display:none!important}}';
     document.head.appendChild(css);
     const note = document.createElement('div'); note.id = 'pc-pos-note'; document.body.appendChild(note);
-    if (!map) { note.className = 'err'; note.textContent = '🏷️ ใส่รหัส POS ไม่ได้: ' + err; return; }
+    const posErr = !map; if (!map) map = {};   // ดึงรหัส POS ไม่ได้ → ยังแก้หัวใบ/เรียงได้ แต่บอกในป้าย
     const cmp = (a, b) => (a ? 0 : 1) - (b ? 0 : 1) || String(a).localeCompare(String(b), 'en', { numeric: true });
     let busy = false;
     const apply = () => {
       if (busy) return; busy = true;
       try {
+        // หัวใบ: "ใบจัดสินค้า / เลขพัสดุ" · บรรทัด "ผู้รับสินค้า" → "ช่องทางการสั่งซื้อ: Lazada (KengAmp2555)"
+        let curOid = '';
+        document.querySelectorAll('.page').forEach(pg => {
+          const pc = pg.querySelector('.pagecount'), di = pg.querySelector('.inforow.docid .info');
+          const m = /#\s*(\d+)/.exec((pc && pc.textContent) || (di && di.textContent) || ''); if (m) curOid = m[1];
+          const oi = ordInfo[curOid]; if (!oi) return;
+          const h1 = pg.querySelector('.header h1');
+          if (h1) { const want = 'ใบจัดสินค้า' + (oi.track ? ' / ' + oi.track : ''); if (h1.dataset.pc !== want) { h1.dataset.pc = want; h1.textContent = want; } }
+          const cr = pg.querySelector('.inforow.customer');
+          if (cr) { const t = cr.querySelector('.title'), v = cr.querySelector('.info');
+            if (t && t.textContent !== 'ช่องทางการสั่งซื้อ') t.textContent = 'ช่องทางการสั่งซื้อ';
+            if (v && v.textContent !== oi.channel) v.textContent = oi.channel; }
+        });
         let hit = 0, miss = 0, seq = 0;
         const groups = new Map();   // ออเดอร์เดียวกันที่ยาวหลายหน้า (OID #49954 หน้า 1/2, 2/2) → เรียง/นับเลขต่อกันทั้งออเดอร์
         document.querySelectorAll('.itemslist').forEach((list, li) => {
@@ -1011,8 +1030,8 @@
           });
           sorted.forEach((tr, i) => { tr.style.order = ''; const n = tr.querySelector('.td.number'); if (n && n.textContent !== (i + 1) + '.') n.textContent = (i + 1) + '.'; });
         });
-        const nt = '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + ' · เรียงตามรหัส POS แล้ว';
-        if (note.className) note.className = ''; if (note.textContent !== nt) note.textContent = nt;   // เขียนเฉพาะเมื่อเปลี่ยน (กัน MutationObserver เรียกซ้ำไม่หยุด)
+        const nt = (posErr ? '⚠️ ดึงรหัส POS ไม่ได้: ' + err + ' · ' : '') + '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + ' · เรียงตามรหัส POS แล้ว';
+        const ncls = posErr ? 'err' : ''; if (note.className !== ncls) note.className = ncls; if (note.textContent !== nt) note.textContent = nt;   // เขียนเฉพาะเมื่อเปลี่ยน (กัน MutationObserver เรียกซ้ำไม่หยุด)
       } finally { busy = false; }
     };
     const quiet = n => { const e = n && (n.nodeType === 1 ? n : n.parentElement); return !!(e && e.closest && e.closest('.issuedate, #pc-pos-note')); };   // นาฬิกาเวลาพิมพ์เดินทุกวินาที → ไม่ต้องคำนวณใหม่
