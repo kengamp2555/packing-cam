@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.27
+// @version      3.28
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -973,11 +973,17 @@
     const apply = () => {
       if (busy) return; busy = true;
       try {
-        let hit = 0, miss = 0;
-        document.querySelectorAll('.itemslist').forEach(list => {
+        let hit = 0, miss = 0, seq = 0;
+        const groups = new Map();   // ออเดอร์เดียวกันที่ยาวหลายหน้า (OID #49954 หน้า 1/2, 2/2) → เรียง/นับเลขต่อกันทั้งออเดอร์
+        document.querySelectorAll('.itemslist').forEach((list, li) => {
           const rows = [...list.children].filter(x => x.classList.contains('item'));
           if (!rows.length) return;
+          const pg = list.closest('.page'), pc = pg && pg.querySelector('.pagecount');
+          const gk = (pc ? pc.textContent.replace(/หน้า[\s\S]*$/, '').trim() : '') || ('list' + li);
+          if (!groups.has(gk)) groups.set(gk, []); groups.get(gk).push(list);
           rows.forEach(tr => {
+            if (!tr.dataset.pcIdx) tr.dataset.pcIdx = String(seq);   // ลำดับเดิมของ LnwShop (จำครั้งแรก)
+            seq++;
             const td = tr.querySelector('.td.code'); if (!td) return;
             let tag = td.querySelector('.pc-pos');
             const img = tr.querySelector('.td.description img'), pn = tr.querySelector('.proname') || tr.querySelector('.td.description');
@@ -991,15 +997,26 @@
             if (tag.dataset.pid !== pid + '|' + code) { tag.dataset.pid = pid + '|' + code; tag.className = 'pc-pos' + (code ? '' : ' none'); tag.textContent = code || '—'; }
             tr.dataset.pcCode = code; code ? hit++ : miss++;
           });
-          // เรียงตามรหัส POS ด้วย CSS order (ไม่ย้าย DOM ของหน้า) แล้วเลขลำดับใหม่
-          const sorted = rows.slice().sort((a, b) => cmp(a.dataset.pcCode, b.dataset.pcCode) || rows.indexOf(a) - rows.indexOf(b));
-          if (getComputedStyle(list).display !== 'flex') { list.style.display = 'flex'; list.style.flexDirection = 'column'; }
-          sorted.forEach((tr, i) => { tr.style.order = String(i); const n = tr.querySelector('.td.number'); if (n && n.textContent !== (i + 1) + '.') n.textContent = (i + 1) + '.'; });
         });
-        note.className = ''; note.textContent = '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + ' · เรียงตามรหัส POS แล้ว';
+        // เรียงตามรหัส POS ทั้งออเดอร์ (ข้ามหน้าได้) · แต่ละหน้าคงจำนวนแถวเท่าเดิม (ไม่ล้นหน้า) · เลขลำดับต่อกันทุกหน้า
+        groups.forEach(lists => {
+          const slots = lists.map(l => [...l.children].filter(x => x.classList.contains('item')));
+          const all = [].concat(...slots), idx = tr => Number(tr.dataset.pcIdx) || 0;
+          const sorted = all.slice().sort((a, b) => cmp(a.dataset.pcCode, b.dataset.pcCode) || idx(a) - idx(b));
+          const anchors = slots.map(sl => { let n = sl[sl.length - 1].nextSibling; while (n && n.classList && n.classList.contains('item')) n = n.nextSibling; return n; });   // จุดวางท้ายแถวของแต่ละหน้า (คิดก่อนย้าย)
+          let k = 0;
+          lists.forEach((l, li) => {
+            const want = sorted.slice(k, k + slots[li].length); k += slots[li].length;
+            if (want.some((tr, i) => slots[li][i] !== tr)) want.forEach(tr => l.insertBefore(tr, anchors[li] && anchors[li].parentNode === l ? anchors[li] : null));   // ย้ายเฉพาะเมื่อลำดับยังไม่ตรง (กันวนไม่รู้จบกับ MutationObserver)
+          });
+          sorted.forEach((tr, i) => { tr.style.order = ''; const n = tr.querySelector('.td.number'); if (n && n.textContent !== (i + 1) + '.') n.textContent = (i + 1) + '.'; });
+        });
+        const nt = '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + ' · เรียงตามรหัส POS แล้ว';
+        if (note.className) note.className = ''; if (note.textContent !== nt) note.textContent = nt;   // เขียนเฉพาะเมื่อเปลี่ยน (กัน MutationObserver เรียกซ้ำไม่หยุด)
       } finally { busy = false; }
     };
-    let t = 0; new MutationObserver(() => { clearTimeout(t); t = setTimeout(apply, 250); }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    const quiet = n => { const e = n && (n.nodeType === 1 ? n : n.parentElement); return !!(e && e.closest && e.closest('.issuedate, #pc-pos-note')); };   // นาฬิกาเวลาพิมพ์เดินทุกวินาที → ไม่ต้องคำนวณใหม่
+    let t = 0; new MutationObserver(ms => { if (ms.every(m => quiet(m.target))) return; clearTimeout(t); t = setTimeout(apply, 250); }).observe(document.body, { childList: true, subtree: true, characterData: true });
     apply();
   })();
 
