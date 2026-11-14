@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.30
+// @version      3.31
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -970,9 +970,13 @@
     } catch (e) { console.warn('[Packing Cam รหัส POS] อ่านข้อมูลออเดอร์ไม่ได้', e); }
     const css = document.createElement('style');
     css.textContent = '.pc-pos{font-weight:800;font-size:1.1em;line-height:1.15;letter-spacing:-.2px;color:#000;margin-bottom:3px;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.pc-pos.none{font-weight:600;font-size:.85em;color:#999}' +
-      '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}@media print{#pc-pos-note{display:none!important}}';
+      '#pc-pos-note{position:fixed;right:12px;bottom:12px;z-index:99999;background:#1b7a4b;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.25)}#pc-pos-note.err{background:#c62828}#pc-pos-note button{margin-left:8px;border:0;border-radius:8px;padding:4px 10px;font:700 12px system-ui,sans-serif;cursor:pointer;background:#fff;color:#1b7a4b}@media print{#pc-pos-note{display:none!important}}';
     document.head.appendChild(css);
     const note = document.createElement('div'); note.id = 'pc-pos-note'; document.body.appendChild(note);
+    const noteTxt = note.appendChild(document.createElement('span')), noteBtn = note.appendChild(document.createElement('button'));
+    // ลำดับรายการ: ค่าเริ่มต้น = ตามใบปะหน้า (ลำดับเดิมของ LnwShop ตรงกับใบปะหน้า Shopee/Lazada) · กดสลับเป็นเรียงตามรหัส POS ได้ (จำไว้ในเครื่อง)
+    let sortPos = false; try { sortPos = localStorage.getItem('pcPosSort') === '1'; } catch (e) { }
+    noteBtn.onclick = () => { sortPos = !sortPos; try { localStorage.setItem('pcPosSort', sortPos ? '1' : '0'); } catch (e) { } apply(); };
     const posErr = !map; if (!map) map = {};   // ดึงรหัส POS ไม่ได้ → ยังแก้หัวใบ/เรียงได้ แต่บอกในป้าย
     const cmp = (a, b) => (a ? 0 : 1) - (b ? 0 : 1) || String(a).localeCompare(String(b), 'en', { numeric: true });
     let busy = false;
@@ -1021,7 +1025,7 @@
         groups.forEach(lists => {
           const slots = lists.map(l => [...l.children].filter(x => x.classList.contains('item')));
           const all = [].concat(...slots), idx = tr => Number(tr.dataset.pcIdx) || 0;
-          const sorted = all.slice().sort((a, b) => cmp(a.dataset.pcCode, b.dataset.pcCode) || idx(a) - idx(b));
+          const sorted = all.slice().sort((a, b) => (sortPos ? cmp(a.dataset.pcCode, b.dataset.pcCode) : 0) || idx(a) - idx(b));
           const anchors = slots.map(sl => { let n = sl[sl.length - 1].nextSibling; while (n && n.classList && n.classList.contains('item')) n = n.nextSibling; return n; });   // จุดวางท้ายแถวของแต่ละหน้า (คิดก่อนย้าย)
           let k = 0;
           lists.forEach((l, li) => {
@@ -1030,8 +1034,9 @@
           });
           sorted.forEach((tr, i) => { tr.style.order = ''; const n = tr.querySelector('.td.number'); if (n && n.textContent !== (i + 1) + '.') n.textContent = (i + 1) + '.'; });
         });
-        const nt = (posErr ? '⚠️ ดึงรหัส POS ไม่ได้: ' + err + ' · ' : '') + '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + ' · เรียงตามรหัส POS แล้ว';
-        const ncls = posErr ? 'err' : ''; if (note.className !== ncls) note.className = ncls; if (note.textContent !== nt) note.textContent = nt;   // เขียนเฉพาะเมื่อเปลี่ยน (กัน MutationObserver เรียกซ้ำไม่หยุด)
+        const nt = (posErr ? '⚠️ ดึงรหัส POS ไม่ได้: ' + err + ' · ' : '') + '🏷️ รหัส POS ' + hit + ' รายการ' + (miss ? ' · ไม่พบ ' + miss : '') + (sortPos ? ' · เรียงตามรหัส POS' : ' · เรียงตามใบปะหน้า');
+        const ncls = posErr ? 'err' : ''; if (note.className !== ncls) note.className = ncls; if (noteTxt.textContent !== nt) noteTxt.textContent = nt;
+        const bt = sortPos ? '↩ เรียงตามใบปะหน้า' : '🔤 เรียงตามรหัส POS'; if (noteBtn.textContent !== bt) noteBtn.textContent = bt;   // เขียนเฉพาะเมื่อเปลี่ยน (กัน MutationObserver เรียกซ้ำไม่หยุด)
       } finally { busy = false; }
     };
     const quiet = n => { const e = n && (n.nodeType === 1 ? n : n.parentElement); return !!(e && e.closest && e.closest('.issuedate, #pc-pos-note')); };   // นาฬิกาเวลาพิมพ์เดินทุกวินาที → ไม่ต้องคำนวณใหม่
