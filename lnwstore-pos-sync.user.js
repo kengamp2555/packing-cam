@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LnwStore → POS : เก็บราคา + สต็อกคงเหลือ + น้ำหนัก/ขนาด
 // @namespace    charoenstock-pos
-// @version      1.3.1
+// @version      1.3.2
 // @description  เปิดลิงก์จากปุ่ม "ดึงราคา+สต็อกจาก LnwShop" ในหน้า "เติมข้อมูลสินค้า" ของระบบ POS แล้วสคริปต์นี้จะอ่านราคาและสต็อกคงเหลือของสินค้าจากหน้า LnwStore สะสมไว้ ให้กดคัดลอกไปวางใน POS
 // @match        https://a.lnwstore.com/*/inventory/product/edit*
 // @run-at       document-idle
@@ -39,7 +39,8 @@
   var DIM_RE = { w: /weight/i, x: /width/i, y: /length/i, z: /height/i };
   // v1.3.1: หน้าแก้ไขหลายรายการโหลดน้ำหนัก/ขนาดพัสดุเฉพาะเมื่อเลือกหัวข้อนั้น → สคริปต์เพิ่มหัวข้อชั่วคราว อ่านค่า แล้วคืนหัวข้อเดิมให้
   // ร้าน kengamp: น้ำหนัก (พัสดุ) = AT5 (กรัม) · กว้าง = AT6 · ยาว = AT7 · สูง = AT8 (ซม.) — ตรวจจากหน้าแก้ไขสินค้าแล้ว
-  var PKG = ['AT5', 'AT6', 'AT7', 'AT8'];
+  var PKG = ['AT5', 'AT6', 'AT7', 'AT8', 'category_id'];   // v1.3.2: + หมวดหมู่ร้าน (ไว้ทำตารางจับคู่หมวด R›S›T ↔ หมวด LnwShop ใน POS)
+  var CATS = 'charoenstock_pos_sync_cats';
   var FLAG = 'charoenstock_pos_sync_on', STORE = 'charoenstock_pos_sync_data', QKEY = 'charoenstock_pos_sync_queue';
   var PER = 40, STALE_MS = 5 * 60 * 1000;
   var on = /[#&]sync(all=|\b)/.test(location.hash || '');
@@ -62,8 +63,9 @@
     save({}); saveQ({ active: true, q: rest, total: all.length, batches: 1 + Math.ceil(rest.length / PER), done: 1, n: nm ? nm[1] : '' });
     try { history.replaceState(null, '', location.pathname + location.search + '#sync'); } catch (e) {}
   })();
-  function line(k, v) { var o = [k].concat([0, 1, 2, 3, 4, 5].map(function (i) { return v[i] === null || v[i] === undefined ? '' : v[i]; })); while (o.length > 3 && o[o.length - 1] === '') o.pop(); return o.join('\t'); }
-  function allText() { var dd = load(); return Object.keys(dd).map(function (k) { return line(k, dd[k]); }).join('\n'); }
+  function loadCats() { try { return JSON.parse(localStorage.getItem(CATS) || '{}') || {}; } catch (e) { return {}; } }
+  function line(k, v) { var o = [k].concat([0, 1, 2, 3, 4, 5, 6].map(function (i) { return v[i] === null || v[i] === undefined ? '' : v[i]; })); while (o.length > 3 && o[o.length - 1] === '') o.pop(); return o.join('\t'); }
+  function allText() { var dd = load(), cc = loadCats(); return Object.keys(dd).map(function (k) { return line(k, dd[k]); }).concat(Object.keys(cc).map(function (k) { return '#CAT\t' + k + '\t' + cc[k]; })).join('\n'); }
   // หาค่าน้ำหนัก/ขนาดใน props (รวมช่องย่อย 1 ชั้น เช่น props.package.weight) · คืน [w, x, y, z] (0/ว่าง = null)
   function dims(props) {
     var pools = [props]; Object.keys(props || {}).forEach(function (k) { var v = props[k]; if (v && typeof v === 'object' && !Array.isArray(v) && /pack|parcel|ship|dimen|size/i.test(k)) pools.unshift(v); });
@@ -102,10 +104,10 @@
       (diagText ? '<button id="ps-diag" style="margin-top:6px;width:100%;border:1px solid #ccc;border-radius:8px;background:#fff;padding:7px;cursor:pointer">🩺 คัดลอกข้อมูลวินิจฉัย (ส่งให้ผู้พัฒนา)</button>' : '') +
       '<div style="color:#666;font-size:11px;margin-top:6px">เปิดลิงก์ถัดไปจาก POS ได้เลย แล้วค่อยคัดลอกทีเดียว → กลับไปวางในกล่อง “ดึงราคา+สต็อกจาก LnwShop” ในหน้าเติมข้อมูลสินค้า</div></div>';
     panel.querySelector('#ps-x').onclick = function () { panel.remove(); };
-    panel.querySelector('#ps-clear').onclick = function () { if (confirm('ล้างข้อมูลที่สะสมไว้ทั้งหมด?')) { save({}); render(title, extra, color); } };
+    panel.querySelector('#ps-clear').onclick = function () { if (confirm('ล้างข้อมูลที่สะสมไว้ทั้งหมด?')) { save({}); try { localStorage.removeItem(CATS); } catch (e) { } render(title, extra, color); } };
     panel.querySelector('#ps-copy').onclick = function () {
       var dd = load();
-      copyText(Object.keys(dd).map(function (k) { return line(k, dd[k]); }).join('\n'), this, '✅ คัดลอกแล้ว — ไปวางที่ POS');
+      copyText(allText(), this, '✅ คัดลอกแล้ว — ไปวางที่ POS');
     };
     var dg = panel.querySelector('#ps-diag'); if (dg) dg.onclick = function () { copyText(diagText, this, '✅ คัดลอกข้อมูลวินิจฉัยแล้ว'); };
   }
@@ -131,19 +133,25 @@
       }
       var vSnap = {}; Object.keys(st.products).forEach(function (id) { var v = (st.products[id] || {}).vars || {}; vSnap[id] = PKG.map(function (k) { return v[k]; }); });
       st.__posPkg = vSnap;
+      // หมวดของสินค้าย่อย (ตัวเลือก) = หมวดของสินค้าหลัก · ชื่อหมวดเต็ม (หลัก › ย่อย) จาก cat_data ของหน้า
+      var subs = st.sub_product_ids || {}; Object.keys(subs).forEach(function (mid) { (subs[mid] || []).forEach(function (sid) { if (vSnap[mid]) vSnap[sid] = [null, null, null, null, vSnap[mid][4]]; }); });
+      var cs = ((st.cat_data || {}).shop) || {}, cc = loadCats();
+      Object.keys(vSnap).forEach(function (id) { var c = vSnap[id][4]; if (c == null || cc[c]) return; var path = [], x = String(c), g = 0; while (x && x !== '0' && g++ < 6) { path.unshift((cs.texts || {})[x] || x); x = (cs.parents || {})[x]; } cc[c] = path.join(' › '); });
+      try { localStorage.setItem(CATS, JSON.stringify(cc)); } catch (e) { }
       if (PKG.some(function (k) { return keep.indexOf(k) < 0; })) { await s.dispatch('set_edit_keys', keep); await sleep(300); t0 = Date.now(); while (Date.now() - t0 < 20000 && st.is_loading) await sleep(300); }
     } catch (e) { dimErr = String(e && e.message || e); }
     var ids = Object.keys(st.products || {}), d = load(), got = 0, gotDim = 0, miss = [], variant = [], rows = [];
     ids.forEach(function (id) {
-      var p = st.products[id], props = (p && p.props) || {}, price = num(props[PRICE_KEY]), stock = num(props[STOCK_KEY]), pk = (st.__posPkg || {})[id], dm = pk ? pk.map(function (v) { var n = num(v); return n !== null && n > 0 ? n : null; }) : dims(props);
-      if (price === null && stock === null) { miss.push(id); return; }
-      d[id] = [price, stock].concat(dm); got++; if (dm.some(function (v) { return v !== null; })) gotDim++;
+      var p = st.products[id], props = (p && p.props) || {}, price = num(props[PRICE_KEY]), stock = num(props[STOCK_KEY]), pk = (st.__posPkg || {})[id], dm = pk ? pk.slice(0, 4).map(function (v) { var n = num(v); return n !== null && n > 0 ? n : null; }) : dims(props);
+      var cat = pk && pk[4] != null && /^\d+$/.test(String(pk[4])) ? Number(pk[4]) : null;
+      if (price === null && stock === null) { if (cat !== null) d[id] = [null, null, null, null, null, null, cat]; else miss.push(id); return; }
+      d[id] = [price, stock].concat(dm.slice(0, 4), [cat]); got++; if (dm.slice(0, 4).some(function (v) { return v !== null; })) gotDim++;
       if (props.has_sub || (props.sub_options && props.sub_options.length)) variant.push(id);
       rows.push('<tr><td style="padding:1px 6px 1px 0;color:#666">' + esc(id) + '</td><td style="padding:1px 6px 1px 0">' + esc(String(props.name || '').slice(0, 22)) + '</td><td style="text-align:right;padding:1px 6px">' + (price === null ? '-' : price) + '</td><td style="text-align:right;font-weight:700">' + (stock === null ? '-' : stock) + '</td><td style="text-align:right;padding-left:6px;color:#555">' + (dm[0] === null ? '-' : dm[0] + 'g') + (dm[1] || dm[2] || dm[3] ? ' ' + [dm[1], dm[2], dm[3]].map(function (v) { return v === null ? '?' : v; }).join('×') : '') + '</td></tr>');
     });
     save(d);
     var p0 = ids.length ? st.products[ids[0]] : null, props0 = (p0 && p0.props) || {};
-    diagText = 'POS-sync v1.3.1\nprice key: ' + PRICE_KEY + ' · stock key: ' + STOCK_KEY + '\nprops keys: ' + Object.keys(props0).join(', ') + '\n\n' + ids.slice(0, 5).map(function (id) {
+    diagText = 'POS-sync v1.3.2\nprice key: ' + PRICE_KEY + ' · stock key: ' + STOCK_KEY + '\nprops keys: ' + Object.keys(props0).join(', ') + '\n\n' + ids.slice(0, 5).map(function (id) {
       var pr = (st.products[id] && st.products[id].props) || {};
       return '# ' + id + ' name=' + pr.name + ' price=' + JSON.stringify(pr.price) + ' price_old=' + JSON.stringify(pr.price_old) + ' balance=' + JSON.stringify(pr.balance) + ' remain=' + JSON.stringify(pr.remain) + ' stocks=' + JSON.stringify(pr.stocks) + ' has_sub=' + pr.has_sub + ' is_main=' + pr.is_main + '\n   dims → ' + JSON.stringify(dims(pr)) + ' · ช่องที่เกี่ยวข้อง: ' + dimKeysOf(pr) + ' · AT5-8=' + JSON.stringify((st.__posPkg || {})[id]);
     }).join('\n');
