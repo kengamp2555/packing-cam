@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LnwStore → POS : เก็บราคา + สต็อกคงเหลือ + น้ำหนัก/ขนาด
 // @namespace    charoenstock-pos
-// @version      1.3.0
+// @version      1.3.1
 // @description  เปิดลิงก์จากปุ่ม "ดึงราคา+สต็อกจาก LnwShop" ในหน้า "เติมข้อมูลสินค้า" ของระบบ POS แล้วสคริปต์นี้จะอ่านราคาและสต็อกคงเหลือของสินค้าจากหน้า LnwStore สะสมไว้ ให้กดคัดลอกไปวางใน POS
 // @match        https://a.lnwstore.com/*/inventory/product/edit*
 // @run-at       document-idle
@@ -37,6 +37,9 @@
     z: ['package_height', 'parcel_height', 'height']
   };
   var DIM_RE = { w: /weight/i, x: /width/i, y: /length/i, z: /height/i };
+  // v1.3.1: หน้าแก้ไขหลายรายการโหลดน้ำหนัก/ขนาดพัสดุเฉพาะเมื่อเลือกหัวข้อนั้น → สคริปต์เพิ่มหัวข้อชั่วคราว อ่านค่า แล้วคืนหัวข้อเดิมให้
+  // ร้าน kengamp: น้ำหนัก (พัสดุ) = AT5 (กรัม) · กว้าง = AT6 · ยาว = AT7 · สูง = AT8 (ซม.) — ตรวจจากหน้าแก้ไขสินค้าแล้ว
+  var PKG = ['AT5', 'AT6', 'AT7', 'AT8'];
   var FLAG = 'charoenstock_pos_sync_on', STORE = 'charoenstock_pos_sync_data', QKEY = 'charoenstock_pos_sync_queue';
   var PER = 40, STALE_MS = 5 * 60 * 1000;
   var on = /[#&]sync(all=|\b)/.test(location.hash || '');
@@ -117,9 +120,22 @@
     t0 = Date.now();
     while (Date.now() - t0 < 60000 && (st.is_loading || !st.products || !Object.keys(st.products).length)) await sleep(400);
     await sleep(600);
+    var dimErr = '';
+    try {   // โหลดน้ำหนัก/ขนาด: เพิ่มหัวข้อ AT5–AT8 ชั่วคราว → รอโหลด → คืนหัวข้อเดิม (หัวข้อที่ร้านเลือกไว้ไม่เปลี่ยน)
+      var keep = (st.edit_keys || []).slice();
+      if (PKG.some(function (k) { return keep.indexOf(k) < 0; })) {
+        render('กำลังโหลดน้ำหนัก/ขนาดพัสดุ…', '', '#c77d1a');
+        await s.dispatch('set_edit_keys', keep.concat(PKG.filter(function (k) { return keep.indexOf(k) < 0; })));
+        await sleep(600); t0 = Date.now();
+        while (Date.now() - t0 < 30000 && (st.is_loading || Object.keys(st.products).some(function (id) { return !(PKG[0] in ((st.products[id] || {}).vars || {})); }))) await sleep(300);
+      }
+      var vSnap = {}; Object.keys(st.products).forEach(function (id) { var v = (st.products[id] || {}).vars || {}; vSnap[id] = PKG.map(function (k) { return v[k]; }); });
+      st.__posPkg = vSnap;
+      if (PKG.some(function (k) { return keep.indexOf(k) < 0; })) { await s.dispatch('set_edit_keys', keep); await sleep(300); t0 = Date.now(); while (Date.now() - t0 < 20000 && st.is_loading) await sleep(300); }
+    } catch (e) { dimErr = String(e && e.message || e); }
     var ids = Object.keys(st.products || {}), d = load(), got = 0, gotDim = 0, miss = [], variant = [], rows = [];
     ids.forEach(function (id) {
-      var p = st.products[id], props = (p && p.props) || {}, price = num(props[PRICE_KEY]), stock = num(props[STOCK_KEY]), dm = dims(props);
+      var p = st.products[id], props = (p && p.props) || {}, price = num(props[PRICE_KEY]), stock = num(props[STOCK_KEY]), pk = (st.__posPkg || {})[id], dm = pk ? pk.map(function (v) { var n = num(v); return n !== null && n > 0 ? n : null; }) : dims(props);
       if (price === null && stock === null) { miss.push(id); return; }
       d[id] = [price, stock].concat(dm); got++; if (dm.some(function (v) { return v !== null; })) gotDim++;
       if (props.has_sub || (props.sub_options && props.sub_options.length)) variant.push(id);
@@ -127,12 +143,12 @@
     });
     save(d);
     var p0 = ids.length ? st.products[ids[0]] : null, props0 = (p0 && p0.props) || {};
-    diagText = 'POS-sync v1.3.0\nprice key: ' + PRICE_KEY + ' · stock key: ' + STOCK_KEY + '\nprops keys: ' + Object.keys(props0).join(', ') + '\n\n' + ids.slice(0, 5).map(function (id) {
+    diagText = 'POS-sync v1.3.1\nprice key: ' + PRICE_KEY + ' · stock key: ' + STOCK_KEY + '\nprops keys: ' + Object.keys(props0).join(', ') + '\n\n' + ids.slice(0, 5).map(function (id) {
       var pr = (st.products[id] && st.products[id].props) || {};
-      return '# ' + id + ' name=' + pr.name + ' price=' + JSON.stringify(pr.price) + ' price_old=' + JSON.stringify(pr.price_old) + ' balance=' + JSON.stringify(pr.balance) + ' remain=' + JSON.stringify(pr.remain) + ' stocks=' + JSON.stringify(pr.stocks) + ' has_sub=' + pr.has_sub + ' is_main=' + pr.is_main + '\n   dims → ' + JSON.stringify(dims(pr)) + ' · ช่องที่เกี่ยวข้อง: ' + dimKeysOf(pr);
+      return '# ' + id + ' name=' + pr.name + ' price=' + JSON.stringify(pr.price) + ' price_old=' + JSON.stringify(pr.price_old) + ' balance=' + JSON.stringify(pr.balance) + ' remain=' + JSON.stringify(pr.remain) + ' stocks=' + JSON.stringify(pr.stocks) + ' has_sub=' + pr.has_sub + ' is_main=' + pr.is_main + '\n   dims → ' + JSON.stringify(dims(pr)) + ' · ช่องที่เกี่ยวข้อง: ' + dimKeysOf(pr) + ' · AT5-8=' + JSON.stringify((st.__posPkg || {})[id]);
     }).join('\n');
     var extra = '<table style="font-size:12px;margin-top:4px"><tr style="color:#666"><td>รหัส</td><td>ชื่อ</td><td style="text-align:right;padding:0 6px">ราคา</td><td style="text-align:right">สต็อก</td><td style="text-align:right;padding-left:6px">น้ำหนัก/ขนาด</td></tr>' + rows.slice(0, 12).join('') + '</table>' + (rows.length > 12 ? '<div style="font-size:11px;color:#666">…และอีก ' + (rows.length - 12) + ' สินค้า</div>' : '');
-    if (got) extra += '<div style="margin-top:6px;font-size:12px;color:' + (gotDim ? '#1b7f4a' : '#c77d1a') + '">' + (gotDim ? '⚖️ มีน้ำหนัก/ขนาด ' + gotDim + '/' + got + ' สินค้า' : '⚠️ ไม่พบน้ำหนัก/ขนาดในหน้านี้ — ถ้าใน LnwShop กรอกไว้แล้ว กด “คัดลอกข้อมูลวินิจฉัย” ส่งให้ผู้พัฒนา') + '</div>';
+    if (got) extra += '<div style="margin-top:6px;font-size:12px;color:' + (gotDim ? '#1b7f4a' : '#c77d1a') + '">' + (gotDim ? '⚖️ มีน้ำหนัก/ขนาด ' + gotDim + '/' + got + ' สินค้า' : '⚠️ ไม่พบน้ำหนัก/ขนาดในหน้านี้' + (dimErr ? ' (' + esc(dimErr.slice(0, 80)) + ')' : ' — สินค้าชุดนี้อาจยังไม่ได้กรอกใน LnwShop')) + '</div>';
     if (variant.length) extra += '<div style="margin-top:6px;font-size:12px;color:#c77d1a">⚠️ มีสินค้าแบบมีตัวเลือกย่อย ' + variant.length + ' รายการ (สต็อก/ราคาอาจเป็นค่ารวมของตัวเลือก) — ตรวจก่อนวางใน POS</div>';
     if (miss.length) extra += '<div style="margin-top:6px;font-size:12px;color:#b42318">ไม่พบราคา/สต็อก ' + miss.length + ' สินค้า (รหัส Lnw: ' + esc(miss.slice(0, 8).join(', ')) + (miss.length > 8 ? '…' : '') + ')</div>';
     console.log('[POS-sync] got', got, 'missing', miss);
