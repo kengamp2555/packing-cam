@@ -169,6 +169,15 @@
   #vBottom{display:flex;gap:8px;padding:10px 10px 24px}
   #vBottom button{flex:1;font-size:17px;padding:14px}
   #vDel{background:#7f1d1d;color:#fff;font-weight:700}
+  #vRe{background:#3b6cf6;color:#fff;font-weight:700}
+  #viewer.top{z-index:950}
+  #vPick{max-height:48vh;overflow-y:auto;background:#15181e;border-top:1px solid #2a2f3a;padding:10px;color:#e8eaf0;font-size:14px}
+  #vPick[hidden]{display:none}
+  #vPick .pk{display:block;width:100%;text-align:left;margin:6px 0;padding:10px 12px;border:1px solid #2a2f3a;border-radius:10px;background:#1f2430;color:#e8eaf0;font:inherit;cursor:pointer}
+  #vPick .pk b{font-size:16px}#vPick .pk span{display:block;color:#8b93a7;font-size:12.5px;margin-top:2px}
+  #vPick .pkRow{display:flex;gap:8px;margin-top:8px}#vPick .pkRow input{flex:1;min-width:0;font:inherit;padding:10px;border-radius:10px;border:1px solid #2a2f3a;background:#0f1115;color:#fff}
+  #vPick .pkRow button{font:inherit;border:0;border-radius:10px;padding:10px 14px;font-weight:700;background:#3b6cf6;color:#fff}
+  #todayPanel .oBtn{padding:4px 10px;margin-left:6px;font-size:13px;background:#3b6cf6}
   #findPanel{display:none;margin-top:10px}
   body.find #findPanel{display:block}
   body.find #packPanel{display:none}
@@ -295,7 +304,8 @@
 <div id="viewer">
   <div id="vTop"><div id="vTitle"></div><button id="vClose">✕ ปิด</button></div>
   <div id="vImgWrap"><img id="vImg" alt=""><div id="vMsg"></div></div>
-  <div id="vBottom"><button id="vDel">🗑 ลบถาวร</button></div>
+  <div id="vPick" hidden></div>
+  <div id="vBottom"><button id="vRe" style="display:none">🔗 จับคู่ใหม่</button><button id="vDel">🗑 ลบถาวร</button></div>
 </div>
 
 <div id="rest"><div id="restMsg">💤 พักหน้าจอ<br>หยิบเครื่อง หรือแตะจอ เพื่อถ่ายต่อ</div></div>
@@ -597,7 +607,9 @@ function renderToday(msg) {
     if (x.notArranged) h += '<p class="bad" style="margin:4px 0">🕒 Shopee ' + esc(x.shop) + ': ยังไม่ดำเนินการ (ยังไม่กดจัดส่ง) ' + x.notArranged + ' ออเดอร์' + (x.shipBy ? ' · ต้องส่งภายใน ' + esc(x.shipBy.slice(5, 16)) : '') + '</p>';
     // สถานะแท็บ/เวลาข้อมูลล่าสุด ย้ายไปแสดงในการ์ดของแต่ละร้านแล้ว
   });
-  if (o.packed) h += '<details><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary><ul>' + o.list.map(x => '<li>' + esc(x.track) + '</li>').join('') + '</ul></details>';
+  if (o.packed) h += '<details' + (L.notPackedCount || (sp.shops || []).some(x => x.missingCount) ? ' open' : '') + '><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary>' +
+    '<p class="mut" style="margin:4px 0">ส่วนใหญ่ = กล้องอ่านบาร์โค้ดผิด · กด 📷 ดูรูป ถ้าเป็นกล่องที่ยังไม่ยิงด้านบน กด 🔗 จับคู่ใหม่ในหน้ารูป</p><ul>' +
+    o.list.map((x, i) => '<li style="margin:4px 0">' + esc(x.track) + (x.row ? '<button class="oBtn" data-o="' + i + '">📷 ดูรูป</button>' : '') + '</li>').join('') + '</ul></details>';
   if (L.prepared || L.pending) h += '<p class="bad" style="margin:4px 0">🕒 Lazada: ' + [L.prepared ? 'ยังไม่กดจัดส่ง (เตรียมจัดส่ง) ' + L.prepared : '', L.pending ? 'สั่งมาใหม่ (ที่ต้องบรรจุ) ' + L.pending : ''].filter(String).join(' · ') + '</p>';
   h += '<p class="mut" style="margin-top:10px">• ตัวหลัง = กล่องที่พิมพ์/กดจัดส่งแล้ว รอขนส่งมารับ ณ เวลาที่อัปเดตล่าสุด (Shopee “ดำเนินการแล้ว” · Lazada “ที่ต้องส่งมอบให้บริษัทขนส่ง”) · ขนส่งรับไปแล้ว = หายจากรายการ<br>• ตัวหน้า = ในกล่องเหล่านั้น ยิงบาร์โค้ดใน Packing Cam แล้วกี่กล่อง · ดึงอัตโนมัติตามที่ตั้งไว้ที่ปุ่ม ⏱ (นอกช่วงนั้น Lazada ยังดึงเองทุกชั่วโมง) · กด 🔄 เพื่ออัปเดตตอนนี้</p>';
   $('todaySheet').innerHTML = h; bindToday();
@@ -610,6 +622,10 @@ function bindToday() {
   const nb = $('tdNoBc');
   if (nb) nb.onclick = () => { $('todayPanel').hidden = true; setMode('find'); bcInput.value = 'NO-BARCODE'; doSearch('NO-BARCODE'); };
   $('todaySheet').querySelectorAll('button[data-h]').forEach(x => x.onclick = () => holdDone(todayData.hold[+x.dataset.h].track, x));
+  $('todaySheet').querySelectorAll('button[data-o]').forEach(x => x.onclick = () => {
+    const o = todayData.other.list[+x.dataset.o];
+    openViewer({ row: o.row, barcode: o.track, takenAt: 'ยิงวันนี้', status: '', fromToday: true });
+  });
 }
 $('bellBtn').onclick = () => { $('todayPanel').hidden = false; renderToday(''); loadHold(false); };
 $('todayPanel').onclick = e => { if (e.target.id === 'todayPanel') $('todayPanel').hidden = true; };
@@ -1596,6 +1612,9 @@ function openViewer(it) {
   $('vImg').removeAttribute('src');
   $('vImg').style.display = 'none';
   $('vDel').style.display = it.status ? 'none' : '';
+  $('vRe').style.display = it.fromToday && !it.status ? '' : 'none';
+  $('viewer').classList.toggle('top', !!it.fromToday);   // เปิดจากหน้า 🔔 → ต้องอยู่เหนือแผงสรุป
+  $('vPick').hidden = true;
   $('vImg').onclick = null;
   if (it.status) { $('vMsg').textContent = '🗑 ' + it.status; return; }
   if (imgCache.has(it.row)) return showViewerImg(imgCache.get(it.row));
@@ -1611,7 +1630,34 @@ function showViewerImg(src) {
   $('vImg').src = src;
   $('vImg').style.display = 'block';
 }
-function closeViewer() { viewing = null; $('viewer').style.display = 'none'; }
+function closeViewer() { viewing = null; $('viewer').style.display = 'none'; $('viewer').classList.remove('top'); $('vPick').hidden = true; }
+
+/* 🔗 จับคู่ใหม่: เลือกกล่องที่ยังไม่ยิง (Lazada/Shopee) หรือพิมพ์เลขพัสดุเอง → แก้บาร์โค้ดของรูปนี้ */
+$('vRe').onclick = () => {
+  const it = viewing, P = $('vPick');
+  if (!it) return;
+  if (!P.hidden) { P.hidden = true; return; }
+  const r = todayData || {}, cand = [];
+  ((r.lazada && r.lazada.notPacked) || []).forEach(x => cand.push({ src: 'Lazada', track: x.track, order: x.order, items: x.items }));
+  ((r.shopee && r.shopee.shops) || []).forEach(s => (s.missing || []).forEach(x => cand.push({ src: 'Shopee ' + s.shop, track: x.track, order: x.order, items: x.items })));
+  P.innerHTML = '<b>เลือกกล่องที่ตรงกับรูปนี้</b> <span style="color:#8b93a7">(ดูเลขพัสดุบนใบปะหน้าในรูป)</span>' +
+    (cand.length ? cand.map((c, i) => '<button class="pk" data-k="' + i + '"><b>' + esc(c.track) + '</b><span>' + esc(c.src + ' · ' + (c.order || '')) + (c.items ? ' · ' + esc(c.items) : '') + '</span></button>').join('')
+      : '<p style="color:#8b93a7">ไม่มีกล่องที่รอยิงในรายการ – พิมพ์เลขพัสดุเองด้านล่าง</p>') +
+    '<div class="pkRow"><input id="pkIn" placeholder="หรือพิมพ์เลขพัสดุเอง" autocapitalize="characters" autocomplete="off"><button id="pkGo">ใช้เลขนี้</button></div>';
+  P.hidden = false;
+  const go = nb => {
+    nb = String(nb || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!nb) return;
+    if (!confirm('เปลี่ยนบาร์โค้ดของรูปนี้\n' + it.barcode + '  →  ' + nb + ' ?')) return;
+    P.querySelectorAll('button').forEach(b => b.disabled = true);
+    callApi('rebarcode', { row: it.row, old: it.barcode, barcode: nb, by: S.staff || '' }).then(res => {
+      todayData = res; holdItems = res.hold || []; renderHold();
+      closeViewer(); renderToday('✅ จับคู่ใหม่แล้ว: ' + it.barcode + ' → ' + nb);
+    }).catch(e => { P.querySelectorAll('button').forEach(b => b.disabled = false); alert('❌ จับคู่ไม่สำเร็จ: ' + (e.message || e)); });
+  };
+  P.querySelectorAll('button[data-k]').forEach(b => b.onclick = () => go(cand[+b.dataset.k].track));
+  $('pkGo').onclick = () => go($('pkIn').value);
+};
 $('vClose').onclick = closeViewer;
 
 $('vDel').onclick = () => {
@@ -1626,8 +1672,9 @@ $('vDel').onclick = () => {
     deletePin = pin.trim();                  // จำ PIN ไว้จนกว่าจะปิดหน้าเว็บ
     it.status = r.status || 'ลบถาวรแล้ว';
     imgCache.delete(it.row);
-    paintResult(it);
+    if (it.li) paintResult(it);
     closeViewer();
+    if (it.fromToday) loadHold(false);
   }).catch(e => {
     if (/PIN/.test(e.message)) deletePin = '';
     alert('ลบไม่สำเร็จ: ' + e.message);
