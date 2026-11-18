@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.1
+// @version      2.2
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -170,12 +170,29 @@
       d.innerHTML = '<b style="font-size:14px">🏪 เพิ่มร้านเข้าระบบ (ชีต Dealer + หน้าดีลเลอร์ POS)</b>' +
         '<div style="display:flex;gap:8px;align-items:center;margin:8px 0">' + (x.logo ? '<img src="' + x.logo + '" style="width:48px;height:48px;object-fit:contain;border:1px solid #eee;border-radius:6px">' : '<span style="color:#b42318">ไม่พบโลโก้</span>') + '<span style="color:#667">โลโก้ร้าน (ใช้เป็นรูปช่อง B)</span></div>' +
         'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อไทย (ว่าง = แปลอัตโนมัติ)' + inp('itS_th', '', 'ปล่อยว่างได้') + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
-        (isItem ? '<div style="margin-top:6px;padding:8px;background:#fff7ed;border-radius:8px">ราคาสินค้านี้ (ไม่บังคับ) → ใส่ในหน้าดีลเลอร์ให้รหัส POS<br>รหัส POS' + inp('itS_sku', '', 'เช่น D100 (ว่าง = เพิ่มแค่ร้าน)') + 'ราคา ¥ ต่อชิ้น (ตามตัวเลือกที่จะซื้อ)' + inp('itS_cny', x.cny || '', '0.15') +
+        (isItem ? '<div style="margin-top:6px;padding:8px;background:#fff7ed;border-radius:8px">ราคาสินค้านี้ (ไม่บังคับ) → อัปเดตราคาให้รหัส POS<br>รหัส POS' +
+          '<div style="display:flex;gap:6px;align-items:center">' + inp('itS_sku', '', 'เช่น D100 หรือพิมพ์ชื่อ แล้วกด 🔎') + '<button id="itS_find" title="หาสินค้าใน POS ที่ใช้ลิงก์นี้ / ค้นด้วยคำที่พิมพ์" style="flex:0 0 auto;padding:6px 10px;border:1px solid #d9480f;background:#fff;color:#d9480f;border-radius:6px;cursor:pointer;font:600 13px sans-serif">🔎 หาสินค้า</button></div>' +
+          '<div id="itS_list" style="max-height:200px;overflow:auto"></div>' + 'ราคา ¥ ต่อชิ้น (ตามตัวเลือกที่จะซื้อ)' + inp('itS_cny', x.cny || '', '0.15') +
           '<div style="color:#667;font-size:12px">' + (x.title || '').slice(0, 70) + '</div></div>' : '') +
         '<div id="itS_msg" style="margin-top:6px;min-height:18px"></div><div style="text-align:right;margin-top:6px"><button id="itS_x" style="padding:6px 12px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer">ปิด</button> <button id="itS_go" style="padding:6px 14px;border:0;background:#d9480f;color:#fff;border-radius:6px;cursor:pointer;font-weight:600">บันทึก</button></div>';
       document.body.appendChild(d);
       const $ = id => document.getElementById(id), msg = (t, bad) => { $('itS_msg').style.color = bad ? '#b42318' : '#137333'; $('itS_msg').textContent = t; };
       $('itS_x').onclick = () => d.remove();
+      // 🔎 หาสินค้าใน POS: เปิดกล่องแล้วหาจากลิงก์นี้ให้เลย · พิมพ์คำ (รหัส/ชื่อ/รุ่น) แล้วกด 🔎 เพื่อค้นเพิ่ม
+      async function find(q) {
+        const L = $('itS_list'); if (!L) return; L.innerHTML = '<div style="color:#667;padding:4px 0">🔎 กำลังหา…</div>';
+        try {
+          const r = await post({ action: 'findItem', itemId: x.itemId, q: q || '' }), its = r.items || [];
+          if (!its.length) { L.innerHTML = '<div style="color:#667;padding:4px 0">' + (q ? 'ไม่พบ "' + q + '" ใน POS' : 'ยังไม่มีสินค้าใน POS ที่ใช้ลิงก์นี้ – พิมพ์รหัส/ชื่อแล้วกด 🔎') + '</div>'; return; }
+          L.innerHTML = its.map((it, i) => '<div data-i="' + i + '" style="display:flex;gap:6px;align-items:center;padding:5px;border-bottom:1px dashed #eadfd6;cursor:pointer">' +
+            (it.img ? '<img src="' + it.img + '" style="width:32px;height:32px;object-fit:cover;border-radius:4px">' : '') + '<div style="flex:1;min-width:0"><b>' + it.sku + '</b> ' + String(it.name).replace(/</g, '&lt;').slice(0, 45) +
+            '<div style="font-size:11.5px;color:#667">' + (it.prices.length ? 'ราคาเดิม ' + it.prices.map(p => p.src + ' ¥' + p.cny + (p.date ? ' (' + p.date.slice(5) + ')' : '')).join(' · ') : it.why) + '</div></div></div>').join('');
+          L.querySelectorAll('[data-i]').forEach(el => el.onclick = () => { const it = its[+el.dataset.i]; $('itS_sku').value = it.sku;
+            L.querySelectorAll('[data-i]').forEach(e2 => e2.style.background = ''); el.style.background = '#ffe8d6';
+            const old = it.prices[0]; msg(old ? 'เลือก ' + it.sku + ' · ราคาเดิม ¥' + old.cny + ' → ใหม่ ¥' + ($('itS_cny').value || '?') + ' (แก้ช่องราคาได้) แล้วกด บันทึก' : 'เลือก ' + it.sku + ' · ยังไม่มีราคาของลิงก์นี้ – บันทึกแล้วจะเพิ่มให้'); });
+        } catch (e) { L.innerHTML = '<div style="color:#b42318">❌ ' + e.message + '</div>'; }
+      }
+      if (isItem) { $('itS_find').onclick = () => find($('itS_sku').value.trim()); $('itS_sku').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); find($('itS_sku').value.trim()); } }); if (x.itemId) find(''); }
       if (!x.cn || !x.url) msg('อ่านชื่อ/ลิงก์ร้านจากหน้านี้ได้ไม่ครบ – กรอกเอง หรือเปิดหน้าร้าน (กดปุ่ม 进店) แล้วกดปุ่มอีกครั้ง', true);
       $('itS_go').onclick = async () => {
         const body = { action: 'addShop', cn: $('itS_cn').value.trim(), thai: $('itS_th').value.trim(), url: $('itS_url').value.trim(), logo: x.logo || '', page: location.href.slice(0, 300) };
@@ -184,7 +201,7 @@
         $('itS_go').disabled = true; msg('กำลังบันทึก… (แปลชื่อ + เขียนชีต ~5–15 วิ)');
         try {
           const r = await post(body);
-          msg((r.existed ? 'มีร้านนี้แล้ว: ' : '✅ เพิ่มร้านแล้ว: ') + (r.thai || '') + ' · ' + r.cn + (r.dealerRow ? ' (ชีต Dealer แถว ' + r.dealerRow + ')' : '') + (r.dealerId ? ' · ' + r.dealerId : '') + (r.priceMsg ? ' · ' + r.priceMsg : '') + (r.why ? ' · ⚠️ ' + r.why : ''), !!r.why);
+          msg((r.existed ? (r.priceMsg ? '✅ ' : 'มีร้านนี้แล้ว: ') : '✅ เพิ่มร้านแล้ว: ') + (r.thai || '') + ' · ' + r.cn + (r.dealerRow ? ' (ชีต Dealer แถว ' + r.dealerRow + ')' : '') + (r.dealerId ? ' · ' + r.dealerId : '') + (r.priceMsg ? ' · ' + r.priceMsg : '') + (r.why ? ' · ⚠️ ' + r.why : ''), !!r.why);
         } catch (e) { msg('❌ ' + e.message, true); }
         $('itS_go').disabled = false;
       };
