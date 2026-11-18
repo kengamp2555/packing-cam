@@ -1,12 +1,16 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.9
+// @version      2.0
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
 // @match        https://www.momocargo.com/*
 // @match        https://momocargo.com/*
+// @match        https://item.taobao.com/*
+// @match        https://detail.tmall.com/*
+// @match        https://*.taobao.com/*
+// @match        https://*.tmall.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -114,6 +118,78 @@
     }));
   }
   /* ===END parsers=== */
+
+  /* ================= 🏪 หน้าสินค้า / หน้าร้าน Taobao: ปุ่ม "เพิ่มร้านนี้เข้าระบบ" =================
+   * อ่านอย่างเดียว: ชื่อร้าน (จีน) · ลิงก์ร้าน · โลโก้ · (หน้าสินค้า) รหัส/ชื่อ/ราคาสินค้า → ส่งให้ Import Tracker เพิ่มลงชีต Dealer + DealerList ของ POS
+   * ไม่กดซื้อ ไม่ใส่ตะกร้า ไม่ส่งข้อความหาร้าน */
+  const ORIG_PAGE = /buyertrade\.taobao\.com\/trade\/itemlist\/list_bought_items|market\.m\.taobao\.com\/app\/dinamic\/pc-trade-logistics|momocargo\.com/;
+  if (!ORIG_PAGE.test(location.href)) {
+    const isItem = /^(item\.taobao\.com|detail\.tmall\.com)$/.test(HOST) && /[?&]id=\d+/.test(location.search);
+    const isShop = /^shop\d+\.taobao\.com$/.test(HOST) || /\.world\.taobao\.com$/.test(HOST) || (/\.tmall\.com$/.test(HOST) && !/^(detail|buy|cart|www|login|pages|list|s)\./.test(HOST));
+    if (isItem || isShop) shopCapture(isItem);
+    return;
+  }
+  function shopCapture(isItem) {
+    const uni = s => { try { return JSON.parse('"' + String(s).replace(/"/g, '\\"') + '"'); } catch (e) { return String(s); } };
+    const abs = u => { u = String(u || '').trim(); if (!u) return ''; if (u.startsWith('//')) u = 'https:' + u; return /^https?:\/\//.test(u) ? u.replace(/^http:/, 'https:') : ''; };
+    const shopRoot = u => { const m = /^https?:\/\/([^\/?#]+)/i.exec(abs(u)); return m && /taobao\.com$|tmall\.com$/.test(m[1]) && !/^(item|detail|s|www|buy|cart|login)\./.test(m[1]) ? 'https://' + m[1].replace(/^www\./, '') + '/' : ''; };
+    function read() {
+      const html = document.documentElement.innerHTML.slice(0, 3e6), pick = re => { const m = re.exec(html); return m ? uni(m[1]) : ''; };
+      const x = { cn: pick(/"shopName"\s*:\s*"([^"]{1,80})"/), url: shopRoot(pick(/"shopUrl"\s*:\s*"([^"]+)"/)), logo: abs(pick(/"shopIcon"\s*:\s*"([^"]+)"/) || pick(/"shopLogo"\s*:\s*"([^"]+)"/)) };
+      // DOM: ลิงก์ไปหน้าร้าน (shopNNN.taobao.com / xxx.world.taobao.com / xxx.tmall.com) ที่มีชื่อร้าน + รูปโลโก้
+      if (!x.url || !x.cn) {
+        const as = Array.from(document.querySelectorAll('a[href]')).filter(a => shopRoot(a.href) && !/item\.htm|search|category/.test(a.href));
+        const a = as.find(a => /[\u3400-\u9fff]/.test(a.textContent || '')) || as[0];
+        if (a) { if (!x.url) x.url = shopRoot(a.href); const t = (a.textContent || '').replace(/\s+/g, ' ').trim().replace(/\s*[>›]$/, '');
+          if (!x.cn && t && t.length <= 40) x.cn = t;
+          if (!x.logo) { const box = a.closest('div') || a; const im = (box.parentElement || box).querySelector('img'); if (im) x.logo = abs(im.currentSrc || im.src); } }
+      }
+      if (!x.url && !isItem) x.url = 'https://' + HOST + '/';
+      if (!x.cn && !isItem) { const t = document.title.split(/[-–|]/).map(s => s.trim()).filter(s => s && !/淘宝|天猫|首页|taobao|tmall/i.test(s)); x.cn = t[0] || ''; }
+      if (isItem) {
+        x.itemId = new URLSearchParams(location.search).get('id') || '';
+        x.title = (pick(/"title"\s*:\s*"([^"]{4,200})"/) || (document.querySelector('h1') || {}).textContent || document.title.replace(/-淘宝网|-tmall.*$/i, '')).trim().slice(0, 150);
+        const pm = /[¥￥]\s*(\d+(?:\.\d+)?)/.exec((document.body && document.body.innerText || '').slice(0, 20000)); x.cny = pm ? +pm[1] : 0;
+        x.itemUrl = 'https://item.taobao.com/item.htm?id=' + x.itemId;
+      }
+      return x;
+    }
+    function ui() {
+      if (document.getElementById('itShopBtn')) return;
+      const b = document.createElement('button'); b.id = 'itShopBtn'; b.textContent = '➕ เพิ่มร้านนี้เข้าระบบ';
+      b.style.cssText = 'position:fixed;right:12px;bottom:56px;z-index:2147483646;background:#d9480f;color:#fff;border:0;border-radius:999px;padding:9px 16px;font:600 14px sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)';
+      b.onclick = panel; document.body.appendChild(b);
+    }
+    function panel() {
+      const x = read(), old = document.getElementById('itShopPanel'); if (old) old.remove();
+      const d = document.createElement('div'); d.id = 'itShopPanel';
+      d.style.cssText = 'position:fixed;right:12px;bottom:104px;z-index:2147483647;width:360px;max-width:92vw;background:#fff;color:#1f2328;border:1px solid #ddd;border-radius:12px;padding:12px;font:13px/1.5 sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.25)';
+      const inp = (id, v, ph) => '<input id="' + id + '" value="' + String(v || '').replace(/"/g, '&quot;') + '" placeholder="' + ph + '" style="width:100%;box-sizing:border-box;padding:6px 8px;margin:3px 0;border:1px solid #ccc;border-radius:6px;font:inherit">';
+      d.innerHTML = '<b style="font-size:14px">🏪 เพิ่มร้านเข้าระบบ (ชีต Dealer + หน้าดีลเลอร์ POS)</b>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin:8px 0">' + (x.logo ? '<img src="' + x.logo + '" style="width:48px;height:48px;object-fit:contain;border:1px solid #eee;border-radius:6px">' : '<span style="color:#b42318">ไม่พบโลโก้</span>') + '<span style="color:#667">โลโก้ร้าน (ใช้เป็นรูปช่อง B)</span></div>' +
+        'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อไทย (ว่าง = แปลอัตโนมัติ)' + inp('itS_th', '', 'ปล่อยว่างได้') + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
+        (isItem ? '<div style="margin-top:6px;padding:8px;background:#fff7ed;border-radius:8px">ราคาสินค้านี้ (ไม่บังคับ) → ใส่ในหน้าดีลเลอร์ให้รหัส POS<br>รหัส POS' + inp('itS_sku', '', 'เช่น D100 (ว่าง = เพิ่มแค่ร้าน)') + 'ราคา ¥ ต่อชิ้น (ตามตัวเลือกที่จะซื้อ)' + inp('itS_cny', x.cny || '', '0.15') +
+          '<div style="color:#667;font-size:12px">' + (x.title || '').slice(0, 70) + '</div></div>' : '') +
+        '<div id="itS_msg" style="margin-top:6px;min-height:18px"></div><div style="text-align:right;margin-top:6px"><button id="itS_x" style="padding:6px 12px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer">ปิด</button> <button id="itS_go" style="padding:6px 14px;border:0;background:#d9480f;color:#fff;border-radius:6px;cursor:pointer;font-weight:600">บันทึก</button></div>';
+      document.body.appendChild(d);
+      const $ = id => document.getElementById(id), msg = (t, bad) => { $('itS_msg').style.color = bad ? '#b42318' : '#137333'; $('itS_msg').textContent = t; };
+      $('itS_x').onclick = () => d.remove();
+      if (!x.cn || !x.url) msg('อ่านชื่อ/ลิงก์ร้านจากหน้านี้ได้ไม่ครบ – กรอกเอง หรือเปิดหน้าร้าน (กดปุ่ม 进店) แล้วกดปุ่มอีกครั้ง', true);
+      $('itS_go').onclick = async () => {
+        const body = { action: 'addShop', cn: $('itS_cn').value.trim(), thai: $('itS_th').value.trim(), url: $('itS_url').value.trim(), logo: x.logo || '', page: location.href.slice(0, 300) };
+        if (isItem) Object.assign(body, { sku: $('itS_sku').value.trim(), cny: +$('itS_cny').value || 0, itemId: x.itemId, itemUrl: x.itemUrl, title: x.title });
+        if (!body.cn) return msg('ใส่ชื่อร้านภาษาจีนก่อน', true);
+        $('itS_go').disabled = true; msg('กำลังบันทึก… (แปลชื่อ + เขียนชีต ~5–15 วิ)');
+        try {
+          const r = await post(body);
+          msg((r.existed ? 'มีร้านนี้แล้ว: ' : '✅ เพิ่มร้านแล้ว: ') + (r.thai || '') + ' · ' + r.cn + (r.dealerRow ? ' (ชีต Dealer แถว ' + r.dealerRow + ')' : '') + (r.dealerId ? ' · ' + r.dealerId : '') + (r.priceMsg ? ' · ' + r.priceMsg : '') + (r.why ? ' · ⚠️ ' + r.why : ''), !!r.why);
+        } catch (e) { msg('❌ ' + e.message, true); }
+        $('itS_go').disabled = false;
+      };
+    }
+    const go = () => { ui(); setTimeout(ui, 3000); };
+    document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', go, { once: true }) : go();
+  }
 
   /* หน้า 已买到的宝贝 ส่งคำขอ mtop.taobao.order.queryboughtlistv2 เอง (เซ็นคำขอด้วยตัวของมันเอง)
      → สคริปต์ไม่สร้างคำขอเอง แค่อ่านผลที่หน้าเว็บได้รับ และเวลาดึงจะกดปุ่ม "หน้าถัดไป" ของหน้าเว็บเหมือนคนกด */
