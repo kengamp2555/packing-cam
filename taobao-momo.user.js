@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.0
+// @version      2.1
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -148,7 +148,9 @@
       if (!x.cn && !isItem) { const t = document.title.split(/[-–|]/).map(s => s.trim()).filter(s => s && !/淘宝|天猫|首页|taobao|tmall/i.test(s)); x.cn = t[0] || ''; }
       if (isItem) {
         x.itemId = new URLSearchParams(location.search).get('id') || '';
-        x.title = (pick(/"title"\s*:\s*"([^"]{4,200})"/) || (document.querySelector('h1') || {}).textContent || document.title.replace(/-淘宝网|-tmall.*$/i, '')).trim().slice(0, 150);
+        // ชื่อสินค้า: ใช้ชื่อแท็บก่อน (เช่น "EPCOS 0.027uf …-淘宝网") · ช่อง "title" ในหน้าเว็บมักเป็นหัวข้ออื่น เช่น 宝贝描述
+        const tt = document.title.replace(/\s*[-–|]\s*(淘宝网|淘宝|天猫|tmall\.com|tmall).*$/i, '').trim();
+        x.title = (tt.length > 4 ? tt : ((document.querySelector('h1') || {}).textContent || pick(/"title"\s*:\s*"([^"]{4,200})"/))).replace(/\s+/g, ' ').trim().slice(0, 150);
         const pm = /[¥￥]\s*(\d+(?:\.\d+)?)/.exec((document.body && document.body.innerText || '').slice(0, 20000)); x.cny = pm ? +pm[1] : 0;
         x.itemUrl = 'https://item.taobao.com/item.htm?id=' + x.itemId;
       }
