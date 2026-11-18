@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.3
+// @version      2.4
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -178,7 +178,7 @@
       d.innerHTML = '<b style="font-size:14px">🏪 เพิ่มร้านเข้าระบบ (ชีต Dealer + หน้าดีลเลอร์ POS)</b>' +
         '<div style="display:flex;gap:8px;align-items:center;margin:8px 0">' + (x.logo ? '<img src="' + x.logo + '" style="width:48px;height:48px;object-fit:contain;border:1px solid #eee;border-radius:6px">' : '<span style="color:#b42318">ไม่พบโลโก้</span>') + '<span style="color:#667">โลโก้ร้าน (ใช้เป็นรูปช่อง B)</span></div>' +
         '<div id="itS_match" style="margin:4px 0 6px;padding:8px;background:#f6f8fa;border-radius:8px;color:#667">🔎 กำลังเช็กว่ามีร้านนี้ในระบบแล้วไหม…</div>' +
-        'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อไทย (ว่าง = ใช้ชื่อเดิม / แปลอัตโนมัติ)' + inp('itS_th', '', 'ปล่อยว่างได้') + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
+        'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อไทย (ว่าง = ใช้ชื่อเดิม / ร้านใหม่แปลให้อัตโนมัติ)<div style="display:flex;gap:6px;align-items:center">' + inp('itS_th', '', 'ปล่อยว่างได้') + '<button id="itS_tr" title="แปลชื่อไทยใหม่จากชื่อจีนด้านบน" style="flex:0 0 auto;padding:6px 10px;border:1px solid #d9480f;background:#fff;color:#d9480f;border-radius:6px;cursor:pointer;font:600 13px sans-serif">🔄 แปลใหม่</button></div>' + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
         (isItem ? '<div style="margin-top:6px;padding:8px;background:#fff7ed;border-radius:8px">ราคาสินค้านี้ (ไม่บังคับ) → อัปเดตราคาให้รหัส POS<br>รหัส POS' +
           '<div style="display:flex;gap:6px;align-items:center">' + inp('itS_sku', '', 'เช่น D100 หรือพิมพ์ชื่อ แล้วกด 🔎') + '<button id="itS_find" title="หาสินค้าใน POS ที่ใช้ลิงก์นี้ / ค้นด้วยคำที่พิมพ์" style="flex:0 0 auto;padding:6px 10px;border:1px solid #d9480f;background:#fff;color:#d9480f;border-radius:6px;cursor:pointer;font:600 13px sans-serif">🔎 หาสินค้า</button></div>' +
           '<div id="itS_list" style="max-height:200px;overflow:auto"></div>' + 'ราคา ¥ ต่อชิ้น (ตามตัวเลือกที่จะซื้อ)' + inp('itS_cny', x.cny || '', '0.15') +
@@ -209,26 +209,37 @@
       const upd = () => !!($('itS_upd') && $('itS_upd').checked);
       const goLbl = () => { $('itS_go').textContent = target ? (upd() ? '💾 อัปเดตร้าน ' + target : '💾 บันทึก (ร้าน ' + target + ')') : '💾 เพิ่มเป็นร้านใหม่'; };
       // เลือกร้านเดิม → ช่อง "อัปเดตข้อมูลร้าน": ชื่อไทย/ชื่อจีน/ลิงก์/โลโก้ ตามช่องด้านล่าง + ช่องร้าน BP/BU/BZ ในชีต Product เปลี่ยนตาม
-      const setTarget = (id, label, sp) => { target = id; matchTh = thOf(sp);
-        const t = $('itS_tgt'); if (t) t.innerHTML = id ? '✅ ร้านเดิม <b>' + esc2(label) + '</b> <a href="#" id="itS_untgt">ยกเลิก</a>' +
-          '<label style="display:block;margin-top:4px;color:#1f2328"><input type="checkbox" id="itS_upd"' + (isItem ? '' : ' checked') + '> อัปเดตข้อมูลร้านเป็นตามช่องด้านล่าง (ชื่อไทย · ชื่อจีน · ลิงก์ · โลโก้) — ช่องร้าน BP/BU/BZ ในชีต Product เปลี่ยนตามให้</label>' : '';
-        const u = $('itS_untgt'); if (u) u.onclick = e => { e.preventDefault(); setTarget('', ''); };
+      // กล่องเขียวด้านบน: บรรทัดเดียวบอกร้านเดิม + ช่องติ๊ก "อัปเดตข้อมูลร้าน" · ไม่ใช่ร้านนี้ → กด "เปลี่ยนร้าน" เพื่อค้น
+      const hd = (sp, by) => (sp.logo ? '<img src="' + esc2(sp.logo) + '" style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:4px">' : '') + '<b>' + esc2(sp.id) + '</b> ' + esc2(thOf(sp) || sp.th) + (by ? ' <span style="color:#667;font-size:12px">(' + esc2(by) + ')</span>' : '');
+      const setTarget = (id, sp, by) => { target = id; matchTh = thOf(sp);
+        const H = $('itS_hd'); if (H) H.innerHTML = id ? '✅ ร้านเดิม: ' + hd(sp, by) : '🆕 ไม่พบร้านนี้ในระบบ → บันทึก = เพิ่มเป็นร้านใหม่';
+        const M = $('itS_match'); if (M) M.style.background = id ? '#ecfdf3' : '#fff7ed';
+        const t = $('itS_tgt'); if (t) t.innerHTML = id ? '<label style="display:block;margin-top:4px"><input type="checkbox" id="itS_upd"' + (isItem ? '' : ' checked') + '> อัปเดตชื่อไทย · ชื่อจีน · ลิงก์ · โลโก้ ตามช่องด้านล่าง <span style="color:#667;font-size:12px">(ช่องร้าน BP/BU/BZ ในชีต Product เปลี่ยนตาม)</span></label>' : '';
         const cb = $('itS_upd'); if (cb) cb.onchange = () => { if (cb.checked && !$('itS_th').value) $('itS_th').value = matchTh; goLbl(); };
         if (id && upd() && !$('itS_th').value) $('itS_th').value = matchTh;
         goLbl(); };
-      const pickBox = () => '<div style="margin-top:6px">ถ้าเป็นร้านเดิมที่เปลี่ยนชื่อ/โลโก้ ให้ค้นแล้วเลือกร้านที่จะทับ:' + inp('itS_q', '', 'พิมพ์ชื่อไทย/จีน/รหัส D… เช่น เว่ยซิง') + '<div id="itS_ql" style="max-height:150px;overflow:auto"></div><div id="itS_tgt" style="margin-top:4px;color:#137333"></div></div>';
       const listShops = q => { const L = $('itS_ql'); if (!L) return; const k = String(q || '').toLowerCase().trim();
         const hit = k ? shops.filter(sp => (sp.id + ' ' + sp.th + ' ' + sp.cn + ' ' + sp.url).toLowerCase().indexOf(k) >= 0).slice(0, 30) : [];
         L.innerHTML = hit.map((sp, i) => '<div data-s="' + i + '" style="display:flex;gap:6px;align-items:center;padding:4px;border-bottom:1px dashed #ddd;cursor:pointer">' + (sp.logo ? '<img src="' + esc2(sp.logo) + '" style="width:26px;height:26px;object-fit:contain">' : '') + '<span><b>' + esc2(sp.id) + '</b> ' + esc2(sp.th) + (sp.cn ? ' · ' + esc2(sp.cn) : '') + '</span></div>').join('') || (k ? '<div style="color:#667">ไม่พบ</div>' : '');
-        L.querySelectorAll('[data-s]').forEach(el => el.onclick = () => { const sp = hit[+el.dataset.s]; setTarget(sp.id, sp.id + ' ' + sp.th, sp); L.innerHTML = ''; }); };
+        L.querySelectorAll('[data-s]').forEach(el => el.onclick = () => { const sp = hit[+el.dataset.s]; $('itS_th').value = ''; setTarget(sp.id, sp, 'เลือกเอง'); L.innerHTML = ''; $('itS_q').value = ''; $('itS_pk').hidden = true; }); };
       post({ action: 'findShop', cn: x.cn, url: x.url, shopId: x.shopId, aliases: x.aliases }).then(r => {
-        shops = r.shops || []; const M = $('itS_match'); if (!M) return;
-        if (r.match && r.match.id) { M.style.background = '#ecfdf3'; M.style.color = '#1f2328';
-          M.innerHTML = '✅ มีร้านนี้แล้ว (' + esc2(r.match.by) + '): ' + (r.match.logo ? '<img src="' + esc2(r.match.logo) + '" style="width:22px;height:22px;object-fit:contain;vertical-align:middle"> ' : '') + '<b>' + esc2(r.match.id) + '</b> ' + esc2(r.match.th) + (r.match.leg ? '<div style="font-size:11.5px;color:#667;white-space:pre-line;margin-top:3px">ชีต Dealer ตอนนี้: ' + esc2(r.match.leg) + '</div>' : '') + pickBox().replace('ถ้าเป็นร้านเดิมที่เปลี่ยนชื่อ/โลโก้ ให้ค้นแล้วเลือกร้านที่จะทับ:', 'ไม่ใช่ร้านนี้? ค้นแล้วเลือกร้านที่ถูก:');
-          setTarget(r.match.id, r.match.id + ' ' + r.match.th, r.match); }
-        else { M.style.background = '#fff7ed'; M.style.color = '#1f2328'; M.innerHTML = '🆕 ไม่พบร้านนี้ในระบบ (เช็กจากลิงก์ร้าน' + (x.shopId ? ' · รหัสร้าน ' + x.shopId : '') + ' · ชื่อจีน)' + pickBox(); setTarget('', ''); }
-        const q = $('itS_q'); if (q) q.oninput = () => listShops(q.value);
+        shops = r.shops || []; const M = $('itS_match'); if (!M) return; M.style.color = '#1f2328';
+        const found = r.match && r.match.id;
+        M.innerHTML = '<div id="itS_hd"></div><div id="itS_tgt"></div>' +
+          '<div style="margin-top:4px;font-size:12px"><a href="#" id="itS_chg">' + (found ? 'ไม่ใช่ร้านนี้? เปลี่ยนร้าน' : 'เป็นร้านเดิมที่เปลี่ยนชื่อ/โลโก้? เลือกร้านที่จะทับ') + '</a>' + (found && r.match.leg ? ' · <a href="#" id="itS_legb">ดูข้อมูลเดิม</a><div id="itS_leg" hidden style="color:#667;white-space:pre-line;margin-top:3px">' + esc2(r.match.leg) + '</div>' : '') + '</div>' +
+          '<div id="itS_pk" hidden>' + inp('itS_q', '', 'พิมพ์ชื่อไทย/จีน/รหัส D… เช่น เว่ยซิง') + '<div id="itS_ql" style="max-height:150px;overflow:auto"></div>' + (found ? '<a href="#" id="itS_new" style="font-size:12px">หรือ เพิ่มเป็นร้านใหม่ (ไม่ทับร้านไหน)</a>' : '') + '</div>';
+        if (found) setTarget(r.match.id, r.match, r.match.by); else setTarget('', null);
+        $('itS_chg').onclick = e => { e.preventDefault(); $('itS_pk').hidden = !$('itS_pk').hidden; if (!$('itS_pk').hidden) $('itS_q').focus(); };
+        const lb = $('itS_legb'); if (lb) lb.onclick = e => { e.preventDefault(); $('itS_leg').hidden = !$('itS_leg').hidden; };
+        const nw = $('itS_new'); if (nw) nw.onclick = e => { e.preventDefault(); $('itS_th').value = ''; setTarget('', null); $('itS_pk').hidden = true; };
+        $('itS_q').oninput = () => listShops($('itS_q').value);
       }).catch(e => { const M = $('itS_match'); if (M) M.innerHTML = '⚠️ เช็กร้านเดิมไม่ได้: ' + esc2(e.message) + ' (ถ้าเพิ่งอัปเดต Import Tracker ให้ Deploy New version ก่อน)'; });
+      // 🔄 แปลชื่อไทยใหม่จากชื่อจีน (Google Translate ที่ Import Tracker) → ใส่ในช่องชื่อไทย ตรวจ/แก้ได้ก่อนบันทึก
+      $('itS_tr').onclick = async () => { const cn = $('itS_cn').value.trim(); if (!cn) return msg('ใส่ชื่อร้านภาษาจีนก่อน', true);
+        $('itS_tr').disabled = true; $('itS_tr').textContent = 'กำลังแปล…';
+        try { const r = await post({ action: 'translate', text: cn }); if (r.t) { $('itS_th').value = r.t; msg('แปลแล้ว – แก้ได้ก่อนกดบันทึก'); } else msg('แปลไม่ได้' + (r.err ? ': ' + r.err : ''), true); }
+        catch (e) { msg('❌ ' + e.message, true); }
+        $('itS_tr').disabled = false; $('itS_tr').textContent = '🔄 แปลใหม่'; };
       if (!x.cn || !x.url) msg('อ่านชื่อ/ลิงก์ร้านจากหน้านี้ได้ไม่ครบ – กรอกเอง หรือเปิดหน้าร้าน (กดปุ่ม 进店) แล้วกดปุ่มอีกครั้ง', true);
       $('itS_go').onclick = async () => {
         const body = { action: 'addShop', cn: $('itS_cn').value.trim(), thai: $('itS_th').value.trim(), url: $('itS_url').value.trim(), logo: x.logo || '', page: location.href.slice(0, 300),
