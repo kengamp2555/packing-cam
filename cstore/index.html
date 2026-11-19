@@ -138,7 +138,7 @@ img{display:block}
 <script>
 /* ===== C-Store หน้าร้านลูกค้า · cs-v1119a =====
  * ใส่ลิงก์ Web app ของ Apps Script (C-Store) ที่นี่ ↓ (ลงท้ายด้วย /exec) */
-const CS_API = 'PASTE_WEB_APP_URL_HERE';
+const CS_API = 'https://script.google.com/macros/s/AKfycbwMV4lEBh4DJDtiCoCkaVEfcz6vxf5WCptzjB2FuHBNKqfYbgJUnAD_yS0kvKwD9dMEIA/exec';
 const API = (function () { try { return localStorage.getItem('cs_api') || CS_API; } catch (e) { return CS_API; } })();
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
