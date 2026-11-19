@@ -377,9 +377,11 @@
       <label class="f">ลิงก์ Apps Script (ลงท้ายด้วย /exec)
         <input id="sUrl" type="url" autocapitalize="off" autocorrect="off" spellcheck="false">
       </label>
+      <div class="hint" style="margin:-8px 0 14px">📌 เอามาจาก: เปิดโปรเจกต์ Apps Script <b>Packing Cam</b> (ไฟล์ Code.gs) → กด <b>Deploy → Manage deployments</b> → คัดลอก <b>Web app URL</b> (ลงท้าย /exec) · ลิงก์นี้เดิมตลอด แม้กด New version · ใช้ลิงก์เดียวกันในสคริปต์ Tampermonkey และส่วนเสริมฉลาก (ใบจัดสินค้า)</div>
       <label class="f">รหัส API_TOKEN
         <input id="sToken" type="text" autocapitalize="off" autocorrect="off" spellcheck="false">
       </label>
+      <div class="hint" style="margin:-8px 0 14px">📌 เอามาจาก: ไฟล์ <b>Config.gs</b> ในโปรเจกต์ Apps Script เดียวกัน บรรทัด <b>API_TOKEN: '…'</b> (ต้องตรงทุกตัวอักษร ตัวพิมพ์เล็ก/ใหญ่มีผล) · ถ้าเปลี่ยนรหัสใน Config.gs ต้องกด Deploy New version แล้วแก้ที่นี่ + Tampermonkey + ส่วนเสริมฉลากให้ตรงกัน</div>
     </div>
     <div class="btns">
       <button id="sTest">ทดสอบการเชื่อมต่อ</button>
