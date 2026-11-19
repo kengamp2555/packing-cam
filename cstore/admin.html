@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>C-Store แอดมิน</title>
+<style>
+:root{--c:#1f6feb;--bg:#f3f4f6;--tx:#1f2328;--mut:#6b7280;--line:#e5e7eb;--ok:#15803d;--warn:#b45309;--bad:#b42318}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI","Noto Sans Thai",Sarabun,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.top{position:sticky;top:0;z-index:20;background:#111827;color:#fff;display:flex;align-items:center;gap:6px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));flex-wrap:wrap}
+.top b{margin-right:6px}
+.tab{border:0;background:#1f2937;color:#d1d5db;padding:8px 12px;border-radius:9px;font-weight:600}
+.tab.on{background:var(--c);color:#fff}
+.tab .n{background:#ef4444;color:#fff;border-radius:99px;padding:0 6px;font-size:11px;margin-left:4px}
+.tab .n:empty{display:none}
+.top .sp{flex:1}
+.wrap{max-width:1200px;margin:0 auto;padding:10px}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 12px;font-weight:600}
+.btn.pri{background:var(--c);border-color:var(--c);color:#fff}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.bad{background:#fff;border-color:#fda29b;color:var(--bad)}
+.btn:disabled{opacity:.5}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:5px 11px;font-size:13px}
+.chip.on{background:var(--c);border-color:var(--c);color:#fff;font-weight:700}
+.olist .o{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;background:#fff;border-radius:12px;padding:10px 12px;margin-bottom:7px;cursor:pointer;border-left:5px solid #cbd5e1}
+.o.new{border-left-color:#f59e0b}.o.slip{border-left-color:#8b5cf6}.o.paid{border-left-color:#3b82f6}.o.packed{border-left-color:#14b8a6}.o.done{border-left-color:#22c55e;opacity:.75}.o.cancel{border-left-color:#ef4444;opacity:.6}
+.o .no{font-weight:800}.o .m{color:var(--mut);font-size:12.5px}.o .t{font-weight:800;text-align:right}
+.st{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11.5px;font-weight:700;background:#eef2ff;color:#3730a3}
+.st.new{background:#fef3c7;color:#92400e}.st.slip{background:#ede9fe;color:#5b21b6}.st.paid{background:#dbeafe;color:#1e40af}.st.packed{background:#ccfbf1;color:#115e59}.st.done{background:#dcfce7;color:#166534}.st.cancel{background:#fee2e2;color:#991b1b}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px 10px}
+.modal[hidden]{display:none}
+.modal .box{background:#fff;border-radius:14px;width:100%;max-width:620px;padding:14px}
+.mh{display:flex;align-items:center;gap:8px;margin-bottom:8px}.mh h3{flex:1;margin:0}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:3px 8px;font-size:13.5px;margin:8px 0}.kv div:nth-child(odd){color:var(--mut)}
+.items div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed var(--line);padding:4px 0}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pan{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px}
+.pan[hidden]{display:none}
+.fld{display:block;margin:6px 0}.fld>span{display:block;font-size:12.5px;color:var(--mut);margin-bottom:2px}
+.fld input:not([type=checkbox]):not([type=color]),.fld textarea,.fld select,.in{width:100%;border:1px solid #cfd5dd;border-radius:8px;padding:8px 10px;background:#fff}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media(max-width:640px){.g2{grid-template-columns:1fr}}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.p{background:#fff;border-radius:11px;overflow:hidden;position:relative;border:2px solid transparent}
+.p.off{opacity:.5}
+.p .ph{aspect-ratio:1;background:#eef1f4 center/cover no-repeat;position:relative;display:grid;place-items:center;color:#aab3bf;font-weight:800;font-size:22px}
+.edit .p .ph{cursor:pointer;outline:2px dashed var(--c);outline-offset:-6px}
+.edit .p .ph::after{content:'📷 เปลี่ยนรูป';white-space:nowrap;position:absolute;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;font-size:11.5px;padding:2px 8px;border-radius:99px;font-weight:600}
+.p .bd{padding:6px 8px;font-size:12.5px}
+.p .nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:34px}
+.p .ft{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+.p .src{position:absolute;top:6px;left:6px;background:rgba(255,255,255,.9);font-size:10.5px;padding:1px 6px;border-radius:99px}
+.p .star{position:absolute;top:4px;right:4px;border:0;background:rgba(255,255,255,.9);border-radius:99px;width:28px;height:28px;font-size:15px}
+.sw{position:relative;width:40px;height:22px;flex:0 0 auto}.sw input{opacity:0;width:0;height:0}.sw span{position:absolute;inset:0;background:#cbd5e1;border-radius:99px;transition:.15s}
+.sw span::before{content:'';position:absolute;width:18px;height:18px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.15s}.sw input:checked+span{background:var(--ok)}.sw input:checked+span::before{transform:translateX(18px)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.bar .in{width:auto;flex:1;min-width:160px}
+.mut{color:var(--mut);font-size:12.5px}
+.msg{font-weight:700;margin:6px 0}.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
+.design{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:12px;align-items:start}
+@media(max-width:900px){.design{grid-template-columns:1fr}.pv{display:none}}
+.pv{position:sticky;top:60px;background:#111;border-radius:30px;padding:10px;height:760px}
+.pv iframe{width:100%;height:100%;border:0;border-radius:22px;background:#fff}
+.ban{display:grid;grid-template-columns:120px 1fr auto;gap:8px;align-items:center;margin:6px 0}
+.ban .im{aspect-ratio:2.4/1;background:#eef1f4 center/cover;border-radius:8px}
+.imgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.imgs img{height:80px;border-radius:8px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:90;background:#111827;color:#fff;padding:10px 16px;border-radius:10px;max-width:92vw}
+.toast[hidden]{display:none}
+.login{max-width:420px;margin:60px auto}
+h2{margin:4px 0 10px;font-size:18px}
+a{color:var(--c)}
+</style>
+</head>
+<body>
+<div id="login" class="login card" hidden>
+  <h2>🔐 C-Store แอดมิน</h2>
+  <label class="fld"><span>รหัสแอดมิน (ADMIN KEY จาก ▶ setup)</span><input id="key" type="password" autocomplete="current-password"></label>
+  <button class="btn pri" id="loginBtn" style="width:100%">เข้าสู่ระบบ</button>
+  <div class="msg bad" id="loginMsg"></div>
+</div>
+<div id="app" hidden>
+  <div class="top"><b>🛒 C-Store</b>
+    <button class="tab on" data-t="orders">📦 ออเดอร์<span class="n" id="nNew"></span></button>
+    <button class="tab" data-t="items">🛍 สินค้า</button>
+    <button class="tab" data-t="design">🎨 หน้าร้าน</button>
+    <button class="tab" data-t="sys">⚙ ระบบ</button>
+    <span class="sp"></span><a href="index.html" target="_blank" style="color:#93c5fd">เปิดร้าน ↗</a></div>
+  <div class="wrap">
+    <section id="t-orders"></section>
+    <section id="t-items" hidden></section>
+    <section id="t-design" hidden></section>
+    <section id="t-sys" hidden></section>
+  </div>
+</div>
+<div class="modal" id="modal" hidden><div class="box" id="mbox"></div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ===== C-Store หน้าแอดมิน · cs-v1119a · ใส่ลิงก์ Web app เดียวกับ index.html ===== */
+const CS_API = 'PASTE_WEB_APP_URL_HERE';
+const API = (function () { try { return localStorage.getItem('cs_api') || CS_API; } catch (e) { return CS_API; } })();
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+const LS = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } } };
+let KEY = LS.get('cs_key', ''), STORE = null, SYS = null, ORD = [], OF = 'open', CATA = null;
+const ST_TH = { new: 'รอดำเนินการ', slip: 'ส่งสลิปแล้ว', paid: 'ชำระแล้ว', packed: 'จัดของเสร็จ', done: 'เสร็จสิ้น', cancel: 'ยกเลิก' };
+async function api(body) {
+  const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ key: KEY }, body)) });
+  const j = await r.json(); if (!j.ok) throw new Error(j.error || j.err || 'เกิดข้อผิดพลาด'); return j;
+}
+function toast(t, ms) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(el._t); el._t = setTimeout(() => { el.hidden = true; }, ms || 2500); }
+function modal(html) { $('mbox').innerHTML = html; $('modal').hidden = false; }
+function closeModal() { $('modal').hidden = true; }
+$('modal').onclick = e => { if (e.target === $('modal') || e.target.closest('[data-close]')) closeModal(); };
+function shrink(file, max, q) {
+  return new Promise((ok, no) => { const img = new Image(), u = URL.createObjectURL(file); img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(u); ok(c.toDataURL('image/jpeg', q || .85)); }; img.onerror = no; img.src = u; });
+}
+const imgUrl = u => { u = String(u || ''); const m = /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=)([\w-]{20,})/.exec(u); return m ? 'https://lh3.googleusercontent.com/d/' + m[1] + '=w400' : u; };
+
+/* ---------- เข้าระบบ ---------- */
+async function boot() {
+  if (/PASTE_WEB_APP_URL/.test(API)) { $('login').hidden = false; $('loginMsg').textContent = 'ยังไม่ได้ใส่ลิงก์ระบบ (CS_API) ในไฟล์ admin.html'; return; }
+  if (!KEY) { $('login').hidden = false; return; }
+  try { const r = await api({ action: 'aInit' }); STORE = r.store; SYS = r.sys; $('login').hidden = true; $('app').hidden = false; setCounts(r.counts); showTab('orders'); }
+  catch (e) { $('login').hidden = false; $('loginMsg').textContent = e.message; }
+}
+$('loginBtn').onclick = () => { KEY = $('key').value.trim(); LS.set('cs_key', KEY); boot(); };
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => showTab(b.dataset.t));
+function showTab(t) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  ['orders', 'items', 'design', 'sys'].forEach(x => { $('t-' + x).hidden = x !== t; });
+  if (t === 'orders') loadOrders(); if (t === 'items') loadItems(); if (t === 'design') renderDesign(); if (t === 'sys') renderSys();
+}
+function setCounts(c) { c = c || {}; const n = (c.new || 0) + (c.slip || 0); $('nNew').textContent = n || ''; }
+
+/* ---------- 📦 ออเดอร์ ---------- */
+async function loadOrders(quiet) {
+  if (!quiet) $('t-orders').innerHTML = '<div class="card mut">กำลังโหลดออเดอร์…</div>';
+  try { const r = await api({ action: 'aOrders' }); ORD = r.orders; setCounts(r.counts); renderOrders(); } catch (e) { $('t-orders').innerHTML = '<div class="card msg bad">' + esc(e.message) + '</div>'; }
+}
+setInterval(() => { if (!$('app').hidden && !$('t-orders').hidden && $('modal').hidden) loadOrders(true); }, 60000);
+function renderOrders() {
+  const F = { open: o => ['new', 'slip', 'paid', 'packed'].indexOf(o.status) >= 0, new: o => o.status === 'new' || o.status === 'slip', paid: o => o.status === 'paid', packed: o => o.status === 'packed', done: o => o.status === 'done', cancel: o => o.status === 'cancel', all: () => true };
+  const lbl = { open: 'ยังไม่จบ', new: 'ใหม่/รอตรวจเงิน', paid: 'ต้องจัดของ', packed: 'รอรับ/รอส่ง', done: 'เสร็จสิ้น', cancel: 'ยกเลิก', all: 'ทั้งหมด' };
+  const L = ORD.filter(F[OF]);
+  $('t-orders').innerHTML = '<div class="bar"><h2 style="margin:0;flex:1">📦 ออเดอร์</h2><button class="btn" onclick="loadOrders()">↻ โหลดใหม่</button></div><div class="chips">' +
+    Object.keys(F).map(k => '<button class="chip' + (OF === k ? ' on' : '') + '" data-of="' + k + '">' + lbl[k] + ' ' + ORD.filter(F[k]).length + '</button>').join('') + '</div>' +
+    '<div class="olist">' + (L.length ? L.map(o => '<div class="o ' + esc(o.status) + '" data-no="' + esc(o.no) + '"><span class="st ' + esc(o.status) + '">' + esc(ST_TH[o.status] || o.status) + '</span>' +
+      '<div><span class="no">' + esc(o.no) + '</span> · ' + esc(o.name) + ' <span class="m">' + esc(o.created.slice(5, 16)) + '</span></div><div class="t">฿' + fmt(o.total) + '</div>' +
+      '<span></span><div class="m">' + (o.method === 'ship' ? '🚚 จัดส่ง' : '🏪 รับที่ร้าน') + ' · ' + (o.pay === 'qr' ? '📱 โอน' + (o.hasSlip ? ' (มีสลิป)' : '') : '💵 จ่ายที่ร้าน') + ' · ' + o.items.length + ' รายการ' + (o.stockCut ? ' · ✂️ ตัด Stock แล้ว' : '') + '</div><span></span></div>').join('') : '<div class="card mut">ไม่มีออเดอร์</div>') + '</div>';
+  $('t-orders').querySelectorAll('[data-of]').forEach(b => b.onclick = () => { OF = b.dataset.of; renderOrders(); });
+  $('t-orders').querySelectorAll('[data-no]').forEach(b => b.onclick = () => openOrder(b.dataset.no));
+}
+function openOrder(no) {
+  const o = ORD.find(x => x.no === no); if (!o) return;
+  const act = [], qr = o.pay === 'qr', fin = o.status === 'done' || o.status === 'cancel';
+  if (!fin && qr && (o.status === 'new' || o.status === 'slip')) act.push('<button class="btn ok" data-a="paid">💰 ยืนยันรับเงินแล้ว</button>');
+  if (!fin && (o.status === 'paid' || (!qr && o.status === 'new'))) act.push('<button class="btn pri" data-a="pack">📦 จัดของเสร็จ + ส่งรูปให้ลูกค้า</button>');
+  if (o.status === 'packed') act.push(o.method === 'ship' ? '<button class="btn ok" data-a="ship">🚚 ส่งของแล้ว</button>' : '<button class="btn ok" data-a="got">✅ ลูกค้ารับของแล้ว' + (qr ? '' : ' + รับเงิน') + '</button>');
+  if (!fin) act.push('<button class="btn bad" data-a="cancel">❌ ยกเลิก</button>');
+  modal('<div class="mh"><h3>' + esc(o.no) + ' <span class="st ' + esc(o.status) + '">' + esc(ST_TH[o.status]) + '</span></h3><button class="btn" data-close>✕</button></div>' +
+    '<div class="kv"><div>ลูกค้า</div><div><b>' + esc(o.name) + '</b> · <a href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a> · LINE: ' + esc(o.lineName) + '</div>' +
+    '<div>รับสินค้า</div><div>' + (o.method === 'ship' ? '🚚 จัดส่ง' : '🏪 รับที่ร้าน') + '</div>' + (o.address ? '<div>ที่อยู่</div><div style="white-space:pre-line">' + esc(o.address) + ' <button class="btn" style="padding:2px 8px" onclick="navigator.clipboard.writeText(' + esc(JSON.stringify(o.name + ' ' + o.phone + '\n' + o.address)) + ').then(()=>toast(\'คัดลอกแล้ว\'))">📋 คัดลอก</button></div>' : '') +
+    '<div>ชำระเงิน</div><div>' + (qr ? '📱 โอนพร้อมเพย์' : '💵 จ่ายที่ร้าน') + (o.paidAt ? ' · ✅ ' + esc(o.paidAt.slice(5, 16)) : '') + (o.hasSlip ? ' <button class="btn" style="padding:2px 8px" id="slipBtn">🧾 ดูสลิป</button>' : '') + '</div>' +
+    '<div>สั่งเมื่อ</div><div>' + esc(o.created) + '</div>' + (o.note ? '<div>หมายเหตุ</div><div>' + esc(o.note) + '</div>' : '') + (o.track ? '<div>เลขพัสดุ</div><div>' + esc(o.track) + '</div>' : '') + (o.cancel ? '<div>เหตุยกเลิก</div><div>' + esc(o.cancel) + '</div>' : '') + '</div>' +
+    '<div id="slipImg"></div><div class="items">' + o.items.map(l => '<div><span><b>' + esc(l.s) + '</b> ' + esc(l.n) + '</span><span>×' + l.q + ' · ฿' + fmt(l.t) + '</span></div>').join('') +
+    (o.ship ? '<div><span>ค่าส่ง</span><span>฿' + fmt(o.ship) + '</span></div>' : '') + '<div style="font-weight:800"><span>รวม</span><span>฿' + fmt(o.total) + '</span></div></div>' +
+    (o.packImgs.length ? '<div class="imgs">' + o.packImgs.map(u => '<img src="' + esc(u) + '=w300" alt="">').join('') + '</div>' : '') +
+    '<div class="acts">' + act.join('') + '</div>' +
+    '<div class="pan" id="pan" hidden></div>' +
+    '<div class="pan" id="stockPan"><b>✂️ ตัด Stock ที่ LnwShop</b> ' + (o.stockCut ? '<span class="st done">ตัดแล้ว ' + esc(o.stockCut.slice(5, 16)) + '</span>' : '<span class="mut">ทำหลังยืนยันรับเงิน (หรือส่งมอบของ)</span>') +
+    '<div class="acts"><button class="btn" id="cutBtn">🔗 เปิด LnwShop ตัด Stock</button><button class="btn" id="cutDone">✔ ตัดเสร็จแล้ว</button></div><div id="cutMsg" class="mut"></div></div>' +
+    '<details style="margin-top:8px"><summary class="mut">ประวัติ</summary><pre class="mut" style="white-space:pre-wrap">' + esc(o.log || '') + '</pre></details>');
+  const sb = $('slipBtn'); if (sb) sb.onclick = async () => { sb.disabled = true; try { const r = await api({ action: 'aSlip', no }); $('slipImg').innerHTML = r.img ? '<img src="' + r.img + '" style="max-width:100%;max-height:70vh;border-radius:10px;margin:6px 0">' : 'ไม่มีสลิป'; } catch (e) { toast(e.message); } sb.disabled = false; };
+  $('mbox').querySelectorAll('[data-a]').forEach(b => b.onclick = () => orderAct(o, b.dataset.a));
+  $('cutBtn').onclick = () => stockCut(o); $('cutDone').onclick = async () => { try { await api({ action: 'aStockCut', no }); toast('บันทึกว่าตัด Stock แล้ว'); await loadOrders(true); openOrder(no); } catch (e) { toast(e.message); } };
+}
+function orderAct(o, a) {
+  const P = $('pan'); P.hidden = false;
+  const notify = '<label style="display:block;margin:6px 0"><input type="checkbox" id="nt" checked> แจ้งลูกค้าทาง LINE</label>';
+  if (a === 'paid') { P.innerHTML = '<b>💰 ยืนยันรับเงิน ฿' + fmt(o.total) + '</b>' + notify + '<div class="acts"><button class="btn ok" id="go">ยืนยัน</button></div><div class="msg" id="pm"></div>';
+    $('go').onclick = () => doStatus(o, { status: 'paid', notify: $('nt').checked }, true); }
+  if (a === 'pack') {
+    const pk = o.method === 'pickup', msg = pk ? '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว พร้อมให้มารับที่ร้านครับ' + (o.pay === 'store' ? '\nยอดชำระที่ร้าน ฿' + fmt(o.total) : '') : '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว กำลังจัดส่งครับ';
+    P.innerHTML = '<b>📦 จัดของเสร็จ</b><label class="fld"><span>ถ่าย/เลือกรูปของที่จัดแล้ว (สูงสุด 4 รูป)</span><input type="file" id="pimg" accept="image/*" capture="environment" multiple></label><div class="imgs" id="pprev"></div>' +
+      '<label class="fld"><span>ข้อความถึงลูกค้า</span><textarea id="pmsg" rows="3">' + esc(msg) + '</textarea></label>' + notify + '<div class="acts"><button class="btn pri" id="go">📤 บันทึก + ส่งให้ลูกค้า</button></div><div class="msg" id="pm"></div>';
+    let imgs = [];
+    $('pimg').onchange = async e => { for (const f of Array.from(e.target.files).slice(0, 4 - imgs.length)) imgs.push(await shrink(f, 1280, .82)); $('pprev').innerHTML = imgs.map(u => '<img src="' + u + '">').join(''); e.target.value = ''; };
+    $('go').onclick = () => doStatus(o, { status: 'packed', imgs, msg: $('pmsg').value, notify: $('nt').checked });
+  }
+  if (a === 'ship') { P.innerHTML = '<b>🚚 ส่งของแล้ว</b><label class="fld"><span>เลขพัสดุ</span><input id="trk"></label>' + notify + '<div class="acts"><button class="btn ok" id="go">บันทึก</button></div><div class="msg" id="pm"></div>';
+    $('go').onclick = () => doStatus(o, { status: 'done', track: $('trk').value.trim(), notify: $('nt').checked }); }
+  if (a === 'got') { P.innerHTML = '<b>✅ ลูกค้ารับของแล้ว' + (o.pay === 'store' ? ' และจ่ายเงิน ฿' + fmt(o.total) + ' แล้ว' : '') + '</b>' + notify + '<div class="acts"><button class="btn ok" id="go">ยืนยัน</button></div><div class="msg" id="pm"></div>';
+    $('go').onclick = () => doStatus(o, { status: 'done', paid: o.pay === 'store', notify: $('nt').checked }, o.pay === 'store'); }
+  if (a === 'cancel') { P.innerHTML = '<b>❌ ยกเลิกออเดอร์</b><label class="fld"><span>เหตุผล (ส่งให้ลูกค้า)</span><input id="rsn" placeholder="เช่น สินค้าหมด"></label>' + notify + '<div class="acts"><button class="btn bad" id="go">ยืนยันยกเลิก</button></div><div class="msg" id="pm"></div>';
+    $('go').onclick = () => doStatus(o, { status: 'cancel', reason: $('rsn').value.trim(), notify: $('nt').checked }); }
+  P.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+async function doStatus(o, body, thenCut) {
+  const b = $('go'), m = $('pm'); b.disabled = true; m.className = 'msg'; m.textContent = 'กำลังบันทึก…';
+  try { const r = await api(Object.assign({ action: 'aStatus', no: o.no }, body)); await loadOrders(true); openOrder(o.no);
+    toast('บันทึกแล้ว' + (r.warn ? ' · ⚠️ ส่ง LINE ไม่สำเร็จ: ' + r.warn : body.notify ? ' · แจ้งลูกค้าแล้ว' : ''), r.warn ? 6000 : 2500);
+    if (thenCut && !o.stockCut) { const n = ORD.find(x => x.no === o.no); stockCut(n); }
+  } catch (e) { m.className = 'msg bad'; m.textContent = e.message; b.disabled = false; }
+}
+async function stockCut(o) {
+  const M = $('cutMsg'); if (M) M.textContent = 'กำลังเตรียมรายการ…';
+  try { const r = await api({ action: 'aStockItems', no: o.no });
+    if (!r.base) { M.innerHTML = '⚠️ ยังไม่ได้ตั้ง "ลิงก์แก้ Stock LnwShop" ที่แท็บ ⚙ ระบบ'; return; }
+    const ok = r.items.filter(i => i.pid), miss = r.items.filter(i => !i.pid), q = {}; ok.forEach(i => { q[i.pid] = (q[i.pid] || 0) + i.q; });
+    const pids = Object.keys(q); if (!pids.length) { M.textContent = '⚠️ สินค้าในออเดอร์ไม่มีรหัส LnwShop (คอลัมน์ AO) – ตัด Stock เอง'; return; }
+    const url = r.base + pids.map(encodeURIComponent).join(',') + '#pos=' + pids.map(p => encodeURIComponent(p) + ':' + q[p]).join(',');
+    window.open(url, 'cstore-lnw');
+    M.innerHTML = 'เปิด LnwShop แล้ว: ' + ok.map(i => esc(i.s) + ' −' + i.q).join(' · ') + (miss.length ? '<br><span style="color:var(--bad)">⚠️ ไม่มีรหัส LnwShop (ตัดเอง): ' + miss.map(i => esc(i.s) + ' ×' + i.q).join(', ') + '</span>' : '') + '<br>กดบันทึกใน LnwShop แล้วกลับมากด ✔ ตัดเสร็จแล้ว';
+  } catch (e) { if (M) M.textContent = '❌ ' + e.message; }
+}
+
+/* ---------- 🛍 สินค้า (แสดง/ซ่อน · รูป · แนะนำ) ---------- */
+let IF = { q: '', c: '', v: 'all' }, IEDIT = false, ISHOWN = 0;
+async function loadItems(force) {
+  if (CATA && !force) return renderItems();
+  $('t-items').innerHTML = '<div class="card mut">กำลังโหลดสินค้าจากชีต POS…</div>';
+  try { CATA = await api({ action: 'aCatalog' }); renderItems(); } catch (e) { $('t-items').innerHTML = '<div class="card msg bad">' + esc(e.message) + '</div>'; }
+}
+function itemsFiltered() {
+  const toks = IF.q.toLowerCase().split(/\s+/).filter(Boolean), feat = STORE.featured || [];
+  return CATA.items.filter(it => { const p = CATA.cats[it.c] || [];
+    if (IF.c && p[0] !== IF.c) return false;
+    if (IF.v === 'on' && !it.sh) return false; if (IF.v === 'off' && it.sh) return false; if (IF.v === 'noimg' && it.i) return false; if (IF.v === 'feat' && feat.indexOf(it.s) < 0) return false;
+    if (IF.v === 'noprice' && it.p > 0) return false;
+    const t = (it.s + ' ' + it.n + ' ' + (it.f || '')).toLowerCase(); return toks.every(x => t.indexOf(x) >= 0); });
+}
+function renderItems() {
+  const c1 = [], seen = {}; CATA.cats.forEach(p => { if (p[0] && !seen[p[0]]) { seen[p[0]] = 1; c1.push(p[0]); } });
+  const L = itemsFiltered(), on = CATA.items.filter(i => i.sh).length;
+  $('t-items').innerHTML = '<div class="bar"><h2 style="margin:0;flex:1">🛍 สินค้า <span class="mut">แสดง ' + on + ' / ทั้งหมด ' + CATA.items.length + '</span></h2><button class="btn" onclick="loadItems(true)">↻ โหลดจากชีต</button>' +
+    '<button class="btn' + (IEDIT ? ' pri' : '') + '" id="editBtn">✏️ โหมดแก้รูป ' + (IEDIT ? 'เปิด' : 'ปิด') + '</button></div>' +
+    '<div class="bar"><input class="in" id="iq" placeholder="ค้นหา รหัส / ชื่อ" value="' + esc(IF.q) + '"><select class="in" id="ic" style="max-width:200px"><option value="">ทุกหมวด</option>' + c1.map(c => '<option' + (IF.c === c ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select>' +
+    '<select class="in" id="iv" style="max-width:170px">' + [['all', 'ทั้งหมด'], ['on', 'แสดงอยู่'], ['off', 'ซ่อนอยู่'], ['noimg', 'ยังไม่มีรูป'], ['feat', '⭐ แนะนำ'], ['noprice', 'ไม่มีราคา AA']].map(x => '<option value="' + x[0] + '"' + (IF.v === x[0] ? ' selected' : '') + '>' + x[1] + '</option>').join('') + '</select></div>' +
+    '<div class="bar"><span class="mut">ที่กรองอยู่ ' + L.length + ' รายการ:</span><button class="btn" data-bulk="1">👁 แสดงทั้งหมด</button><button class="btn" data-bulk="0">🙈 ซ่อนทั้งหมด</button>' +
+    '<span class="sp" style="flex:1"></span><button class="btn" id="posImg">📸 ดึงรูปในเซลล์จาก POS</button></div><div class="msg" id="imsg"></div>' +
+    '<div class="pgrid' + (IEDIT ? ' edit' : '') + '" id="pg"></div><div class="mut" id="pmore" style="text-align:center;padding:12px"></div><input type="file" id="pfile" accept="image/*" hidden>';
+  ISHOWN = 0; IL = L; moreItems();
+  let t = null; $('iq').oninput = () => { clearTimeout(t); t = setTimeout(() => { IF.q = $('iq').value.trim(); renderItemsKeep(); }, 200); };
+  $('ic').onchange = () => { IF.c = $('ic').value; renderItems(); }; $('iv').onchange = () => { IF.v = $('iv').value; renderItems(); };
+  $('editBtn').onclick = () => { IEDIT = !IEDIT; renderItems(); };
+  $('t-items').querySelectorAll('[data-bulk]').forEach(b => b.onclick = () => bulkShow(L, b.dataset.bulk === '1'));
+  $('posImg').onclick = posImages;
+  $('pg').onchange = e => { const sw = e.target.closest('[data-sw]'); if (sw) setShow(sw.dataset.sw, sw.checked); };
+  $('pg').onclick = e => { const st = e.target.closest('[data-star]'); if (st) return toggleFeat(st.dataset.star); const ph = e.target.closest('.ph'); if (ph && IEDIT) pickImg(ph.closest('.p').dataset.s); };
+  pmObs.observe($('pmore'));
+}
+let IL = [];
+function renderItemsKeep() { const y = scrollY; const q = IF.q; renderItems(); const i = $('iq'); i.focus(); i.setSelectionRange(q.length, q.length); scrollTo(0, y); }
+function pCard(it) {
+  const feat = (STORE.featured || []).indexOf(it.s) >= 0, src = { own: '📷 ถ่ายเอง', pos: 'POS', link: 'ลิงก์ POS' }[it.src] || '';
+  return '<div class="p' + (it.sh ? '' : ' off') + '" data-s="' + esc(it.s) + '"><div class="ph" style="' + (it.i ? 'background-image:url(&quot;' + esc(imgUrl(it.i)) + '&quot;)' : '') + '">' + (it.i ? '' : esc(it.s.slice(0, 3))) + (src ? '<span class="src">' + src + '</span>' : '') + '</div>' +
+    '<button class="star" data-star="' + esc(it.s) + '" title="สินค้าแนะนำ (หน้าแรก)">' + (feat ? '⭐' : '☆') + '</button>' +
+    '<div class="bd"><div class="nm">' + esc(it.n) + '</div><div class="mut">' + esc(it.s) + ' · ' + (it.p > 0 ? '฿' + fmt(it.p) : '<span style="color:var(--bad)">ไม่มีราคา</span>') + ' · ' + (it.q === null ? 'BN –' : 'BN ' + it.q) + '</div>' +
+    '<div class="ft"><span class="mut">' + (it.sh ? 'แสดง' : 'ซ่อน') + (it.ov ? '' : ' (ค่าเริ่มต้น)') + '</span><label class="sw"><input type="checkbox" data-sw="' + esc(it.s) + '"' + (it.sh ? ' checked' : '') + '><span></span></label></div></div></div>';
+}
+function moreItems() { const add = IL.slice(ISHOWN, ISHOWN + 60); ISHOWN += add.length; $('pg').insertAdjacentHTML('beforeend', add.map(pCard).join('')); $('pmore').textContent = ISHOWN < IL.length ? 'เลื่อนลงเพื่อดูเพิ่ม…' : IL.length ? '' : 'ไม่พบสินค้า'; }
+const pmObs = new IntersectionObserver(es => { if (es[0].isIntersecting && IL && ISHOWN < IL.length) moreItems(); }, { rootMargin: '500px' });
+async function setShow(s, on) { const it = CATA.items.find(x => x.s === s); try { await api({ action: 'aShow', skus: [s], show: on }); it.sh = on; it.ov = on ? '1' : '0'; const el = document.querySelector('.p[data-s="' + CSS.escape(s) + '"]'); if (el) el.outerHTML = pCard(it); toast((on ? 'แสดง ' : 'ซ่อน ') + s); } catch (e) { toast(e.message); } }
+async function bulkShow(L, on) {
+  if (!L.length || !confirm((on ? 'แสดง' : 'ซ่อน') + ' ' + L.length + ' รายการที่กรองอยู่?')) return;
+  const m = $('imsg'); m.className = 'msg'; m.textContent = 'กำลังบันทึก…';
+  try { for (let i = 0; i < L.length; i += 300) { const ch = L.slice(i, i + 300); await api({ action: 'aShow', skus: ch.map(x => x.s), show: on }); ch.forEach(x => { x.sh = on; x.ov = on ? '1' : '0'; }); m.textContent = 'บันทึกแล้ว ' + Math.min(L.length, i + 300) + '/' + L.length; }
+    renderItems(); toast('บันทึกแล้ว'); } catch (e) { m.className = 'msg bad'; m.textContent = e.message; }
+}
+let pickSku = '';
+function pickImg(s) { pickSku = s; const f = $('pfile'); f.value = ''; f.onchange = async () => { const file = f.files[0]; if (!file) return; const it = CATA.items.find(x => x.s === pickSku);
+  const el = document.querySelector('.p[data-s="' + CSS.escape(pickSku) + '"] .ph'); if (el) { el.style.opacity = .4; }
+  try { const img = await shrink(file, 1000, .85); const r = await api({ action: 'aImg', sku: pickSku, img }); it.i = r.url; it.src = 'own'; const p = document.querySelector('.p[data-s="' + CSS.escape(pickSku) + '"]'); if (p) p.outerHTML = pCard(it); toast('เปลี่ยนรูป ' + pickSku + ' แล้ว'); }
+  catch (e) { toast(e.message); if (el) el.style.opacity = 1; } }; f.click(); }
+async function toggleFeat(s) {
+  const F = (STORE.featured || []).slice(), i = F.indexOf(s); if (i >= 0) F.splice(i, 1); else F.push(s);
+  try { const r = await api({ action: 'aSaveStore', store: { featured: F } }); STORE = r.store; const it = CATA.items.find(x => x.s === s); const p = document.querySelector('.p[data-s="' + CSS.escape(s) + '"]'); if (p) p.outerHTML = pCard(it); toast(i >= 0 ? 'เอาออกจากสินค้าแนะนำ' : '⭐ เพิ่มเป็นสินค้าแนะนำ'); } catch (e) { toast(e.message); }
+}
+async function posImages() {
+  const m = $('imsg'), b = $('posImg'); b.disabled = true; m.className = 'msg'; let tot = 0;
+  try { for (let k = 0; k < 40; k++) { m.textContent = '📸 กำลังดึงรูปจากเซลล์ I ของชีต POS… ได้แล้ว ' + tot + ' รูป'; const r = await api({ action: 'aPosImgs', max: 25 }); tot += r.done; if (!r.left || (!r.done && !r.fail)) { m.textContent = '✅ ดึงรูปแล้ว ' + tot + ' รูป' + (r.left ? ' · เหลือ ' + r.left : ''); break; } }
+    CATA = null; loadItems(); } catch (e) { m.className = 'msg bad'; m.textContent = e.message; }
+  b.disabled = false;
+}
+
+/* ---------- 🎨 หน้าร้าน (ปรับแต่ง + ดูตัวอย่างสด) ---------- */
+let D = null;
+function renderDesign() {
+  D = JSON.parse(JSON.stringify(STORE));
+  const f = (k, lbl, ph, type) => '<label class="fld"><span>' + lbl + '</span><input data-k="' + k + '" type="' + (type || 'text') + '" value="' + esc(getK(k)) + '" placeholder="' + esc(ph || '') + '"></label>';
+  const t = (k, lbl, ph) => '<label class="fld"><span>' + lbl + '</span><textarea data-k="' + k + '" rows="3" placeholder="' + esc(ph || '') + '">' + esc(getK(k)) + '</textarea></label>';
+  const cb = (k, lbl) => '<label style="display:block;margin:6px 0"><input type="checkbox" data-k="' + k + '"' + (getK(k) ? ' checked' : '') + '> ' + lbl + '</label>';
+  $('t-design').innerHTML = '<div class="design"><div>' +
+    '<div class="card"><h2>🏪 ชื่อ / โลโก้ / สี</h2><div class="g2">' + f('name', 'ชื่อร้าน') + f('tagline', 'คำโปรย') + '</div>' +
+    '<div class="bar"><div class="ph" id="logoPv" style="width:56px;height:56px;border-radius:12px;background:#eef1f4 center/cover;background-image:url(&quot;' + esc(imgUrl(D.logo)) + '&quot;)"></div><button class="btn" id="logoUp">📷 เปลี่ยนโลโก้</button><button class="btn" id="logoX">ลบ</button>' +
+    '<label class="fld" style="margin-left:auto"><span>สีหลัก</span><input type="color" data-k="color" value="' + esc(D.color || '#1f6feb') + '"></label></div>' +
+    t('announce', 'แถบประกาศ (ว่าง = ไม่แสดง)', 'เช่น 🎉 ส่งฟรีเมื่อซื้อครบ 500 บาท') + '</div>' +
+    '<div class="card"><h2>🖼 แบนเนอร์ (อัตราส่วน 2.4:1)</h2><div id="bans"></div><button class="btn" id="banAdd">➕ เพิ่มแบนเนอร์</button><div class="mut">ลิงก์: ว่าง = ไม่มีลิงก์ · <code>cat:ชื่อหมวด</code> = เปิดหมวด · <code>sku:รหัส</code> = เปิดสินค้า · https://… = เว็บอื่น</div></div>' +
+    '<div class="card"><h2>🏪 รับที่ร้าน / 🚚 จัดส่ง</h2>' + f('pickup.addr', 'ที่อยู่ร้าน') + '<div class="g2">' + f('pickup.hours', 'เวลาเปิด', 'จ-ส 8:30–17:30') + f('pickup.phone', 'เบอร์ร้าน') + '</div>' + f('pickup.map', 'ลิงก์ Google Maps') +
+    '<div class="g2">' + f('ship.fee', 'ค่าส่งเหมา (บาท)', '50', 'number') + f('ship.free', 'ซื้อครบเท่านี้ ส่งฟรี (0 = ไม่มี)', '0', 'number') + '</div>' + f('ship.note', 'หมายเหตุการจัดส่ง', 'เช่น ส่ง Flash ทุกวัน 15:00') + '</div>' +
+    '<div class="card"><h2>💳 ชำระเงิน</h2>' + cb('pay.qr', '📱 โอนพร้อมเพย์ + แนบสลิป') + cb('pay.store', '💵 จ่ายที่ร้าน (เฉพาะรับที่ร้าน)') + '<div class="g2">' + f('ppId', 'พร้อมเพย์ (เบอร์ 10 หลัก / เลข 13 หลัก)') + f('ppName', 'ชื่อบัญชี (แสดงใต้ QR)') + '</div>' + t('checkoutNote', 'ข้อความในหน้ายืนยันสั่งซื้อ') + '</div>' +
+    '<div class="card"><h2>📦 การแสดงสินค้า</h2>' + cb('defaultShow', 'สินค้าใหม่/ที่ยังไม่ได้ตั้ง = แสดงในร้าน (ปิด = ต้องกดเปิดทีละตัวในแท็บสินค้า)') + cb('hideZero', 'ซ่อนสินค้าที่สต็อก BN = 0') +
+    '<label class="fld"><span>สินค้าที่ BN ไม่มีข้อมูล (#N/A = ไม่ได้ลง Lazada)</span><select data-k="naStock"><option value="ask"' + (D.naStock !== 'hide' ? ' selected' : '') + '>แสดง "สอบถามสต็อก" (สั่งได้)</option><option value="hide"' + (D.naStock === 'hide' ? ' selected' : '') + '>ซ่อน</option></select></label>' +
+    '<div class="mut">สินค้าแนะนำบนหน้าแรก: กด ☆ ที่แท็บ 🛍 สินค้า (ตอนนี้ ' + (D.featured || []).length + ' รายการ)</div></div>' +
+    '<div class="card"><h2>📝 ท้ายร้าน + LINE</h2>' + t('footer', 'ข้อความท้ายร้าน', 'เช่น รับประกันสินค้า 7 วัน · ทักแชทสอบถามได้') + f('liffId', 'LIFF ID (จาก LINE Developers)', '1657xxxxxx-AbCdEfGh') + '</div>' +
+    '<div class="bar" style="position:sticky;bottom:0;background:var(--bg);padding:8px 0"><button class="btn pri" id="dSave" style="flex:1">💾 บันทึกหน้าร้าน</button><a class="btn" href="index.html?preview=1" target="_blank">👁 ดูเต็มจอ</a></div><div class="msg" id="dMsg"></div>' +
+    '</div><div class="pv"><iframe id="pvf" src="index.html?preview=1"></iframe></div></div>';
+  renderBans(); pushPreview();
+  $('t-design').querySelectorAll('[data-k]').forEach(el => el.oninput = el.onchange = () => { setK(el.dataset.k, el.type === 'checkbox' ? el.checked : el.type === 'number' ? (+el.value || 0) : el.value); pushPreview(); });
+  $('logoUp').onclick = () => upImg(async d => { const r = await api({ action: 'aBanner', img: d }); D.logo = r.url; $('logoPv').style.backgroundImage = 'url("' + imgUrl(r.url) + '")'; pushPreview(); }, 400);
+  $('logoX').onclick = () => { D.logo = ''; $('logoPv').style.backgroundImage = ''; pushPreview(); };
+  $('banAdd').onclick = () => upImg(async d => { const r = await api({ action: 'aBanner', img: d }); (D.banners = D.banners || []).push({ img: r.url, link: '' }); renderBans(); pushPreview(); }, 1600);
+  $('dSave').onclick = saveDesign;
+}
+function getK(k) { return k.split('.').reduce((o, x) => (o == null ? '' : o[x]), D) ?? ''; }
+function setK(k, v) { const p = k.split('.'); let o = D; for (let i = 0; i < p.length - 1; i++) o = o[p[i]] = o[p[i]] || {}; o[p[p.length - 1]] = v; }
+function pushPreview() { LS.set('cs_preview', D); }
+function upImg(cb, max) { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.onchange = async () => { const f = i.files[0]; if (!f) return; toast('กำลังอัปโหลด…', 8000); try { await cb(await shrink(f, max, .86)); toast('อัปโหลดแล้ว – อย่าลืมกดบันทึก'); } catch (e) { toast(e.message); } }; i.click(); }
+function renderBans() {
+  const B = D.banners || [];
+  $('bans').innerHTML = B.map((b, i) => '<div class="ban"><div class="im" style="background-image:url(&quot;' + esc(imgUrl(b.img)) + '&quot;)"></div><input class="in" data-bl="' + i + '" value="' + esc(b.link || '') + '" placeholder="ลิงก์ (ไม่บังคับ)">' +
+    '<span><button class="btn" data-bu="' + i + '">▲</button><button class="btn" data-bd="' + i + '">▼</button><button class="btn bad" data-bx="' + i + '">✕</button></span></div>').join('') || '<div class="mut">ยังไม่มีแบนเนอร์</div>';
+  $('bans').querySelectorAll('[data-bl]').forEach(el => el.oninput = () => { B[+el.dataset.bl].link = el.value.trim(); pushPreview(); });
+  $('bans').querySelectorAll('[data-bu],[data-bd],[data-bx]').forEach(el => el.onclick = () => { const i = +(el.dataset.bu || el.dataset.bd || el.dataset.bx);
+    if (el.dataset.bx !== undefined) B.splice(i, 1); else { const j = el.dataset.bu !== undefined ? i - 1 : i + 1; if (j < 0 || j >= B.length) return; [B[i], B[j]] = [B[j], B[i]]; } renderBans(); pushPreview(); });
+}
+async function saveDesign() {
+  const m = $('dMsg'), b = $('dSave'); b.disabled = true; m.className = 'msg'; m.textContent = 'กำลังบันทึก…';
+  try { const r = await api({ action: 'aSaveStore', store: D }); STORE = r.store; await api({ action: 'aRefresh' }); m.className = 'msg ok'; m.textContent = '✅ บันทึกแล้ว ลูกค้าเห็นหน้าใหม่ภายในไม่กี่วินาที'; } catch (e) { m.className = 'msg bad'; m.textContent = e.message; }
+  b.disabled = false;
+}
+
+/* ---------- ⚙ ระบบ ---------- */
+function renderSys() {
+  const s = SYS || {}, liffId = (STORE && STORE.liffId) || '';
+  $('t-sys').innerHTML = '<div class="card"><h2>💬 LINE Messaging API (แจ้งเตือน / ส่งรูปให้ลูกค้า)</h2><div class="mut">สถานะ: ' + (s.hasToken ? '✅ ใส่ Channel access token แล้ว' : '⚠️ ยังไม่ได้ใส่ token') + '</div>' +
+    '<label class="fld"><span>Channel access token (long-lived) จาก LINE Developers → Messaging API</span><input id="tok" type="password" placeholder="' + (s.hasToken ? '•••••• (ใส่ใหม่เพื่อเปลี่ยน)' : 'วาง token') + '"></label><button class="btn pri" id="tokSave">บันทึก token</button>' +
+    '<h3 style="margin:14px 0 4px">🔔 ผู้รับแจ้งเตือนออเดอร์ใหม่</h3>' + ((s.admins || []).map(a => '<div class="bar"><span>👤 ' + esc(a.name || a.id) + '</span><button class="btn bad" data-rm="' + esc(a.id) + '">เอาออก</button></div>').join('') || '<div class="mut">ยังไม่มี</div>') +
+    '<div class="acts"><button class="btn" id="regBtn">➕ เพิ่มผู้รับแจ้งเตือน (สแกนด้วยมือถือ)</button><button class="btn" id="testBtn">🔔 ทดสอบส่ง</button></div><div id="regBox"></div>' +
+    '<div class="mut" style="margin-top:6px">ออเดอร์ที่สั่งจากในแอป LINE จะส่งสรุปเข้าแชท LINE OA ของร้านด้วย (ฟรี ไม่กินโควตาข้อความ)</div></div>' +
+    '<div class="card"><h2>✂️ ตัด Stock ที่ LnwShop</h2><label class="fld"><span>ลิงก์แก้ Stock LnwShop (คัดลอกจาก POS → ⚙ ตั้งค่าช่องทางขาย → "ลิงก์แก้ Stock")</span><input id="lnw" value="' + esc(s.lnwUrl || '') + '" placeholder="https://…/?pids="></label><button class="btn pri" id="lnwSave">บันทึก</button>' +
+    '<div class="mut">ใช้สคริปต์ Tampermonkey เดิมของ POS (lnwstore-pos-stock) กรอกช่อง "ลดสินค้าในคลัง" ให้</div></div>' +
+    '<div class="card"><h2>🔗 ข้อมูลระบบ</h2><div class="mut">ชีตข้อมูล C-Store: <a href="' + esc(s.dataUrl || '#') + '" target="_blank">เปิด</a> · ลิงก์ร้านใน LINE: ' + (liffId ? '<b>https://liff.line.me/' + esc(liffId) + '</b>' : 'ใส่ LIFF ID ที่แท็บ 🎨 หน้าร้าน') + '</div>' +
+    '<div class="acts"><button class="btn" id="warm">🔄 อัปเดตรายการสินค้าในร้านเดี๋ยวนี้</button><button class="btn" id="logout">ออกจากระบบ</button></div><div class="msg" id="sMsg"></div></div>';
+  $('tokSave').onclick = () => sysSave({ lineToken: $('tok').value.trim() });
+  $('lnwSave').onclick = () => sysSave({ lnwUrl: $('lnw').value.trim() });
+  $('t-sys').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => sysSave({ removeAdmin: b.dataset.rm }));
+  $('testBtn').onclick = async () => { try { const r = await api({ action: 'aTestLine' }); toast(r.ok ? '✅ ส่งแล้ว' : '⚠️ ' + r.err, 5000); } catch (e) { toast(e.message, 5000); } };
+  $('regBtn').onclick = regLink; $('logout').onclick = () => { LS.set('cs_key', ''); location.reload(); };
+  $('warm').onclick = async () => { $('sMsg').textContent = 'กำลังอัปเดต…'; try { await api({ action: 'aRefresh' }); $('sMsg').textContent = '✅ อัปเดตแล้ว'; CATA = null; } catch (e) { $('sMsg').textContent = e.message; } };
+}
+async function sysSave(body) { try { const r = await api(Object.assign({ action: 'aSys' }, body)); SYS = r.sys; renderSys(); toast('บันทึกแล้ว'); } catch (e) { toast(e.message, 5000); } }
+async function regLink() {
+  const liffId = STORE && STORE.liffId; if (!liffId) return toast('ใส่ LIFF ID ที่แท็บ 🎨 หน้าร้าน แล้วบันทึกก่อน', 5000);
+  try { const r = await api({ action: 'aRegCode' }), url = 'https://liff.line.me/' + liffId + '?reg=' + r.code;
+    $('regBox').innerHTML = '<div class="pan"><b>สแกน QR นี้ด้วยมือถือที่จะรับแจ้งเตือน (ภายใน 15 นาที)</b><div id="regQr" style="width:200px;margin:8px 0"></div><div class="mut" style="word-break:break-all">' + esc(url) + '</div><div class="mut">ต้องเพิ่ม LINE OA ของร้านเป็นเพื่อนก่อน ถึงจะได้รับข้อความ · ลงทะเบียนเสร็จกด ↻ แท็บนี้</div></div>';
+    await new Promise((ok, no) => { if (window.QRLib) return ok(); const s = document.createElement('script'); s.src = 'qrlib.js'; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+    const q = new window.QRLib.QRCode(-1, window.QRLib.QRErrorCorrectLevel.M); q.addData(url); q.make(); const n = q.getModuleCount(), z = n + 8; let p = '';
+    for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) if (q.isDark(a, c)) p += 'M' + (c + 4) + ',' + (a + 4) + 'h1v1h-1z';
+    $('regQr').innerHTML = '<svg viewBox="0 0 ' + z + ' ' + z + '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + p + '"/></svg>';
+  } catch (e) { toast(e.message, 5000); }
+}
+boot();
+</script>
+</body>
+</html>
