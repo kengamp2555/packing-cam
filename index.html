@@ -152,7 +152,12 @@
   ul{list-style:none;padding:0;margin:0}
   /* รูปล่าสุด – กดอะไรไม่ได้ กันมือโดน */
   #lastBox{pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;background:var(--card);border-radius:12px;padding:8px;display:none}
-  #lastImg{display:block;width:100%;max-height:55vh;object-fit:contain;border-radius:8px;background:#000}
+  #lastImg{display:block;width:100%;max-height:55vh;object-fit:contain;border-radius:8px;background:#000;pointer-events:auto}
+  #lastImgBox{overflow:hidden;border-radius:8px}
+  /* 🔍 จีบนิ้วขยายรูป (รูปล่าสุด + รูปในหน้าค้นหา) · แตะ 2 ครั้ง = ขยาย/คืน */
+  img.zoomable{touch-action:pan-y;transform-origin:0 0;will-change:transform}
+  img.zoomable.zoomed{touch-action:none}
+  .zoomHint{position:absolute;right:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px;pointer-events:none}
   #lastName{font-size:16px;font-weight:700;margin-top:8px;word-break:break-all}
   #lastSt{font-size:15px;font-weight:700;margin-top:2px}
   #lastSt.pending{color:var(--warn)} #lastSt.done{color:var(--ok)} #lastSt.retry{color:var(--err)}
@@ -163,7 +168,7 @@
   #viewer{position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:15;display:none;flex-direction:column}
   #vTop{display:flex;align-items:center;gap:8px;padding:10px}
   #vTitle{flex:1;min-width:0;font-size:14px;word-break:break-all}
-  #vImgWrap{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;-webkit-overflow-scrolling:touch}
+  #vImgWrap{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative}
   #vImg{max-width:100%;max-height:100%;object-fit:contain}
   #vMsg{color:var(--mut);padding:20px;text-align:center}
   #vBottom{display:flex;gap:8px;padding:10px 10px 24px}
@@ -252,7 +257,7 @@
     </div>
     <div id="warn"></div>
     <div id="lastBox">
-      <img id="lastImg" alt="">
+      <div id="lastImgBox"><img id="lastImg" alt=""></div>
       <div id="lastName"></div>
       <div id="lastSt"></div>
     </div>
@@ -882,6 +887,7 @@ async function openMag() {
   magTx = magTy = 0;
   setFrozen(false);
   applyMagZoom();
+  if (trackCaps().torch && !torchOn) setTorch(true, true);   // 🔦 เปิดไฟฉายทันทีที่เข้าแว่นขยาย (ปิดเองตอนออก)
 }
 
 async function closeMag() {
@@ -913,14 +919,14 @@ function updateMagTransform() {
   $('magFreeze').style.transform = t;
 }
 
-async function setTorch(on) {
+async function setTorch(on, quiet) {
   if (!track) return;
   try {
     await track.applyConstraints({ advanced: [{ torch: on }] });
     torchOn = on;
   } catch (e) {
     torchOn = false;
-    if (on) alert('สั่งเปิดไฟฉายไม่สำเร็จ');
+    if (on && !quiet) alert('สั่งเปิดไฟฉายไม่สำเร็จ');
   }
   $('magTorch').classList.toggle('on', torchOn);
 }
@@ -1017,16 +1023,26 @@ async function initDetector() {
   }
 }
 
+/* กันอ่านมั่ว: ลายคีย์บอร์ด/ตัวหนังสือบางทีถูกอ่านเป็นบาร์โค้ดสั้นๆ เช่น "A6A" (มักเป็นแบบ codabar / code39 / upc_e)
+ * เลขพัสดุ/เลขออเดอร์จริงยาว 8 ตัวขึ้นไป → สั้นกว่านั้นไม่รับ · แบบที่อ่านพลาดง่าย (codabar/itf/upc/ean8) ต้องยาว 10 ตัวขึ้นไป */
+function codeOk(v, fmt) {
+  const c = String(v || '').trim();
+  if (!/^[A-Za-z0-9\-_]{8,40}$/.test(c)) return false;
+  if (/codabar|itf|upc|ean_8/i.test(fmt || '') && c.length < 10) return false;
+  return /\d/.test(c);   // ต้องมีตัวเลขอย่างน้อย 1 ตัว
+}
 async function detectOn(canvas, hard) {
   try {
     if (detector) {
       const r = await detector.detect(canvas);
-      return r.length ? r[0].rawValue : '';
+      const ok = r.find(x => codeOk(x.rawValue, x.format));
+      return ok ? ok.rawValue : '';
     }
     if (zxFast) {
       const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
       const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
-      return (hard ? zxHard : zxFast).decodeWithState(bmp).getText();
+      const t = (hard ? zxHard : zxFast).decodeWithState(bmp).getText();
+      return codeOk(t) ? t : '';
     }
   } catch (e) {}
   return '';
@@ -1941,6 +1957,48 @@ const safe = s => s.replace(/[\\\/:*?"<>|\s]+/g, '-').slice(0, 80);
   if (!IN_GAS && !API_URL) openSettings();
   pump();
 })();
+
+/* ===== 🔍 จีบนิ้วขยายรูป (iPhone) =====
+ * 2 นิ้ว = ขยาย/ย่อ (1–6 เท่า) · ขยายแล้วลาก 1 นิ้ว = เลื่อนดู · แตะ 2 ครั้ง = ขยาย 2.5 เท่าตรงจุดที่แตะ / คืนขนาดเดิม
+ * เปลี่ยนรูปใหม่ (src) → คืนขนาดเดิมเอง · หลังจีบ/ลาก ไม่นับเป็นการแตะ (กันไปกดปุ่มเปลี่ยนรูปของ vImg) */
+function makeZoomable(img) {
+  if (!img || img.dataset.zoom) return; img.dataset.zoom = '1'; img.classList.add('zoomable');
+  let s = 1, tx = 0, ty = 0, g = null, lastTap = 0, moved = 0;
+  const box = () => { const r = img.getBoundingClientRect(); return { l: r.left - tx, t: r.top - ty, w: r.width / s, h: r.height / s }; };
+  const clamp = b => { if (s <= 1) { s = 1; tx = 0; ty = 0; return; } tx = Math.min(0, Math.max(b.w - b.w * s, tx)); ty = Math.min(0, Math.max(b.h - b.h * s, ty)); };
+  const apply = () => { img.style.transform = s > 1 ? 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')' : ''; img.classList.toggle('zoomed', s > 1); };
+  const reset = () => { s = 1; tx = 0; ty = 0; g = null; apply(); };
+  const mid = t => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+  img.addEventListener('touchstart', e => {
+    const t = e.touches, b = box();
+    if (t.length === 2) { const m = mid(t); g = { k: 2, s0: s, d0: dist(t), cx: (m.x - b.l - tx) / s, cy: (m.y - b.t - ty) / s, b }; e.preventDefault(); }
+    else if (t.length === 1 && s > 1) g = { k: 1, x0: t[0].clientX, y0: t[0].clientY, tx0: tx, ty0: ty, b };
+    else g = null;
+  }, { passive: false });
+  img.addEventListener('touchmove', e => {
+    if (!g) return; const t = e.touches;
+    if (g.k === 2 && t.length === 2) { const m = mid(t); s = Math.min(6, Math.max(1, g.s0 * dist(t) / g.d0)); tx = m.x - g.b.l - g.cx * s; ty = m.y - g.b.t - g.cy * s; }
+    else if (g.k === 1 && t.length === 1) { tx = g.tx0 + t[0].clientX - g.x0; ty = g.ty0 + t[0].clientY - g.y0; }
+    else return;
+    clamp(g.b); apply(); moved = Date.now(); e.preventDefault();
+  }, { passive: false });
+  img.addEventListener('touchend', e => {
+    if (e.touches.length) { if (e.touches.length === 1 && s > 1) { const t = e.touches[0]; g = { k: 1, x0: t.clientX, y0: t.clientY, tx0: tx, ty0: ty, b: box() }; } return; }
+    if (g && g.k === 2 && s < 1.05) reset();
+    g = null;
+    const now = Date.now(), ct = e.changedTouches[0];
+    if (now - moved > 300 && now - lastTap < 300) {   // แตะ 2 ครั้ง
+      const b = box();
+      if (s > 1) reset(); else { const cx = ct.clientX - b.l, cy = ct.clientY - b.t; s = 2.5; tx = cx - cx * s; ty = cy - cy * s; clamp(b); apply(); }
+      moved = now; lastTap = 0; e.preventDefault(); return;
+    }
+    lastTap = now;
+  });
+  img.addEventListener('click', e => { if (Date.now() - moved < 400 || s > 1) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);   // จีบ/ลาก/ขยายอยู่ ไม่นับเป็นแตะ
+  new MutationObserver(reset).observe(img, { attributes: true, attributeFilter: ['src'] });
+}
+makeZoomable($('lastImg')); makeZoomable($('vImg'));
 </script>
 </body>
 </html>

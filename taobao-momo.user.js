@@ -1,12 +1,16 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      1.9
+// @version      2.6
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
 // @match        https://www.momocargo.com/*
 // @match        https://momocargo.com/*
+// @match        https://item.taobao.com/*
+// @match        https://detail.tmall.com/*
+// @match        https://*.taobao.com/*
+// @match        https://*.tmall.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -114,6 +118,165 @@
     }));
   }
   /* ===END parsers=== */
+
+  /* ================= 🏪 หน้าสินค้า / หน้าร้าน Taobao: ปุ่ม "เพิ่มร้านนี้เข้าระบบ" =================
+   * อ่านอย่างเดียว: ชื่อร้าน (จีน) · ลิงก์ร้าน · โลโก้ · (หน้าสินค้า) รหัส/ชื่อ/ราคาสินค้า → ส่งให้ Import Tracker เพิ่มลงชีต Dealer + DealerList ของ POS
+   * ไม่กดซื้อ ไม่ใส่ตะกร้า ไม่ส่งข้อความหาร้าน */
+  const ORIG_PAGE = /buyertrade\.taobao\.com\/trade\/itemlist\/list_bought_items|market\.m\.taobao\.com\/app\/dinamic\/pc-trade-logistics|momocargo\.com/;
+  if (!ORIG_PAGE.test(location.href)) {
+    const isItem = /^(item\.taobao\.com|detail\.tmall\.com)$/.test(HOST) && /[?&]id=\d+/.test(location.search);
+    // หน้าร้าน: shopNNNN.taobao.com · โดเมนร้าน เช่น dgwxdz.taobao.com (ร้านเดียวกัน) · xxx.world.taobao.com · xxx.tmall.com
+    const SVC = /^(www|s|buyertrade|trade|cart|buy|login|i|h5|m|market|favorite|item|detail|pages|list|world|rate|refund\d*|consumeprod|ai|guang|huodong|pub|wuliu|myseller|seller|fuwu|ishop|uland|tb|g|gw|img|gtms\d*|o|tbc|qn|sell|scm)\./;
+    const isShop = /^shop\d+\.taobao\.com$/.test(HOST) || /\.world\.taobao\.com$/.test(HOST) || (/\.tmall\.com$/.test(HOST) && !/^(detail|buy|cart|www|login|pages|list|s)\./.test(HOST))
+      || (/^[a-z0-9-]+\.taobao\.com$/.test(HOST) && !SVC.test(HOST));
+    if (isItem || isShop) shopCapture(isItem);
+    return;
+  }
+  function shopCapture(isItem) {
+    const uni = s => { try { return JSON.parse('"' + String(s).replace(/"/g, '\\"') + '"'); } catch (e) { return String(s); } };
+    const abs = u => { u = String(u || '').trim(); if (!u) return ''; if (u.startsWith('//')) u = 'https:' + u; return /^https?:\/\//.test(u) ? u.replace(/^http:/, 'https:') : ''; };
+    const shopRoot = u => { const m = /^https?:\/\/([^\/?#]+)/i.exec(abs(u)); return m && /taobao\.com$|tmall\.com$/.test(m[1]) && !/^(item|detail|s|www|buy|cart|login)\./.test(m[1]) ? 'https://' + m[1].replace(/^www\./, '') + '/' : ''; };
+    function read() {
+      const html = document.documentElement.innerHTML.slice(0, 3e6), pick = re => { const m = re.exec(html); return m ? uni(m[1]) : ''; };
+      const x = { cn: pick(/"shopName"\s*:\s*"([^"]{1,80})"/), url: shopRoot(pick(/"shopUrl"\s*:\s*"([^"]+)"/)), logo: abs(pick(/"shopIcon"\s*:\s*"([^"]+)"/) || pick(/"shopLogo"\s*:\s*"([^"]+)"/)) };
+      // DOM: ลิงก์ไปหน้าร้าน (shopNNN.taobao.com / xxx.world.taobao.com / xxx.tmall.com) ที่มีชื่อร้าน + รูปโลโก้
+      if (!x.url || !x.cn) {
+        const as = Array.from(document.querySelectorAll('a[href]')).filter(a => shopRoot(a.href) && !/item\.htm|search|category/.test(a.href));
+        const a = as.find(a => /[\u3400-\u9fff]/.test(a.textContent || '')) || as[0];
+        if (a) { if (!x.url) x.url = shopRoot(a.href); const t = (a.textContent || '').replace(/\s+/g, ' ').trim().replace(/\s*[>›]$/, '');
+          if (!x.cn && t && t.length <= 40) x.cn = t;
+          if (!x.logo) { const box = a.closest('div') || a; const im = (box.parentElement || box).querySelector('img'); if (im) x.logo = abs(im.currentSrc || im.src); } }
+      }
+      if (!x.url && !isItem) x.url = 'https://' + HOST + '/';
+      // รหัสร้าน Taobao (shopId) = ตัวตนถาวรของร้าน (ชื่อ/โลโก้/โดเมนร้านเปลี่ยนได้) · ลิงก์ทุกแบบของร้านนี้ → ส่งไปให้ระบบจับคู่ร้านเดิม
+      const hs = /^shop(\d+)\./.exec(HOST);
+      x.shopId = (!isItem && hs ? hs[1] : '') || pick(/"shopId"\s*:\s*"?(\d{4,})/) || pick(/[?&]shopId=(\d{4,})/) || pick(/shop_id\s*[:=]\s*"?(\d{4,})/) || (hs ? hs[1] : '');
+      const al = new Set([x.url]); if (!isItem) al.add('https://' + HOST + '/'); if (x.shopId) al.add('https://shop' + x.shopId + '.taobao.com/');
+      x.aliases = Array.from(al).filter(Boolean);
+      if (!x.cn && !isItem) { const t = document.title.split(/[-–|]/).map(s => s.trim()).filter(s => s && !/淘宝|天猫|首页|taobao|tmall/i.test(s)); x.cn = t[0] || ''; }
+      if (isItem) {
+        x.itemId = new URLSearchParams(location.search).get('id') || '';
+        // ชื่อสินค้า: ใช้ชื่อแท็บก่อน (เช่น "EPCOS 0.027uf …-淘宝网") · ช่อง "title" ในหน้าเว็บมักเป็นหัวข้ออื่น เช่น 宝贝描述
+        const tt = document.title.replace(/\s*[-–|]\s*(淘宝网|淘宝|天猫|tmall\.com|tmall).*$/i, '').trim();
+        x.title = (tt.length > 4 ? tt : ((document.querySelector('h1') || {}).textContent || pick(/"title"\s*:\s*"([^"]{4,200})"/))).replace(/\s+/g, ' ').trim().slice(0, 150);
+        const pm = /[¥￥]\s*(\d+(?:\.\d+)?)/.exec((document.body && document.body.innerText || '').slice(0, 20000)); x.cny = pm ? +pm[1] : 0;
+        x.itemUrl = 'https://item.taobao.com/item.htm?id=' + x.itemId;
+      }
+      return x;
+    }
+    function ui() {
+      if (document.getElementById('itShopBtn')) return;
+      const b = document.createElement('button'); b.id = 'itShopBtn'; b.textContent = '➕ เพิ่มร้านนี้เข้าระบบ';
+      b.style.cssText = 'position:fixed;right:12px;bottom:56px;z-index:2147483646;background:#d9480f;color:#fff;border:0;border-radius:999px;padding:9px 16px;font:600 14px sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)';
+      b.onclick = panel; document.body.appendChild(b);
+    }
+    function panel() {
+      const x = read(), old = document.getElementById('itShopPanel'); if (old) old.remove();
+      const d = document.createElement('div'); d.id = 'itShopPanel';
+      d.style.cssText = 'position:fixed;right:12px;bottom:104px;z-index:2147483647;width:380px;max-width:92vw;max-height:calc(100vh - 130px);overflow:auto;background:#fff;color:#1f2328;border:1px solid #ddd;border-radius:12px;padding:12px;font:13px/1.5 sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.25)';
+      const inp = (id, v, ph) => '<input id="' + id + '" value="' + String(v || '').replace(/"/g, '&quot;') + '" placeholder="' + ph + '" style="width:100%;box-sizing:border-box;padding:6px 8px;margin:3px 0;border:1px solid #ccc;border-radius:6px;font:inherit">';
+      const sBtn = (id, t, title) => '<button id="' + id + '" title="' + (title || '') + '" style="flex:0 0 auto;padding:6px 10px;border:1px solid #d9480f;background:#fff;color:#d9480f;border-radius:6px;cursor:pointer;font:600 13px sans-serif">' + t + '</button>';
+      const bigBtn = (id, t, bg) => '<button id="' + id + '" style="padding:7px 14px;border:0;background:' + bg + ';color:#fff;border-radius:6px;cursor:pointer;font-weight:600">' + t + '</button>';
+      const box = (c, bd) => 'margin-top:10px;padding:10px;border:2px solid ' + bd + ';border-radius:10px;background:' + c;
+      d.innerHTML = '<div style="display:flex;align-items:center"><b style="font-size:14px;flex:1">🏪 Taobao → ระบบ POS</b><button id="itS_x" style="padding:4px 10px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer">ปิด</button></div>' +
+        // ── กล่อง 1: ร้าน (ชื่อ/ลิงก์/โลโก้) ──
+        '<div id="itS_shopBox" style="' + box('#fff', '#d9480f') + '"><b style="color:#d9480f">① ข้อมูลร้าน</b> <span style="color:#667;font-size:12px">ชีต Dealer + หน้าดีลเลอร์ POS</span>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin:6px 0">' + (x.logo ? '<img src="' + x.logo + '" style="width:44px;height:44px;object-fit:contain;border:1px solid #eee;border-radius:6px">' : '<span style="color:#b42318">ไม่พบโลโก้</span>') + '<div id="itS_match" style="flex:1;padding:6px 8px;background:#f6f8fa;border-radius:8px;color:#667">🔎 กำลังเช็กว่ามีร้านนี้ในระบบแล้วไหม…</div></div>' +
+        '<div id="itS_pk" hidden>' + inp('itS_q', '', 'ค้นร้านเดิม: ชื่อไทย/จีน/รหัส D…') + '<div id="itS_ql" style="max-height:150px;overflow:auto"></div><a href="#" id="itS_new" style="font-size:12px">หรือ เพิ่มเป็นร้านใหม่ (ไม่ทับร้านไหน)</a></div>' +
+        'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อไทย (ว่าง = ใช้ชื่อเดิม / ร้านใหม่แปลให้อัตโนมัติ)<div style="display:flex;gap:6px;align-items:center">' + inp('itS_th', '', 'ปล่อยว่างได้') + sBtn('itS_tr', '🔄 แปลใหม่', 'แปลชื่อไทยใหม่จากชื่อจีนด้านบน') + '</div>' + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
+        '<div style="color:#667;font-size:12px">อัปเดตร้าน = ชื่อไทย · ชื่อจีน · ลิงก์ · โลโก้ ตามช่องด้านบน · ช่องร้าน BP/BU/BZ ในชีต Product เปลี่ยนตามให้</div>' +
+        '<div id="itS_msg" style="margin-top:4px;min-height:16px"></div><div style="text-align:right">' + bigBtn('itS_go', '💾 บันทึกร้าน', '#d9480f') + '</div></div>' +
+        // ── กล่อง 2: ราคา + ลิงก์สินค้า (เฉพาะหน้าสินค้า) ──
+        (isItem ? '<div id="itS_priceBox" style="' + box('#f5f9ff', '#2563eb') + '"><b style="color:#2563eb">② ราคา + ลิงก์สินค้า</b> <span style="color:#667;font-size:12px">ไม่แก้ข้อมูลร้าน</span>' +
+          '<div id="itS_pshop" style="font-size:12px;color:#667;margin:2px 0 4px">ร้าน: รอเช็กร้าน…</div>' +
+          'รหัส POS<div style="display:flex;gap:6px;align-items:center">' + inp('itS_sku', '', 'เช่น D100 หรือพิมพ์ชื่อ แล้วกด 🔎') + sBtn('itS_find', '🔎 หาสินค้า', 'หาสินค้าใน POS ที่ใช้ลิงก์นี้ / ค้นด้วยคำที่พิมพ์') + '</div>' +
+          '<div id="itS_list" style="max-height:200px;overflow:auto"></div>' + 'ราคา ¥ ต่อชิ้น (ตามตัวเลือกที่เลือกอยู่)' + inp('itS_cny', x.cny || '', '0.15') +
+          'ลิงก์สินค้า <span style="color:#667;font-size:12px">(เลือกตัวเลือกบนหน้าเว็บ → ลิงก์เปลี่ยนตาม skuId)</span>' + inp('itS_link', '', '') +
+          '<div style="color:#667;font-size:12px">' + (x.title || '').slice(0, 70).replace(/</g, '&lt;') + '</div>' +
+          '<div id="itS_pmsg" style="margin-top:4px;min-height:16px"></div><div style="text-align:right">' + bigBtn('itS_pgo', '💲 อัปเดตราคา + ลิงก์', '#2563eb') + '</div></div>' : '');
+      document.body.appendChild(d);
+      const $ = id => document.getElementById(id);
+      const say2 = (el, t, bad) => { const m = $(el); if (!m) return; m.style.color = bad ? '#b42318' : '#137333'; m.textContent = t; };
+      const msg = (t, bad) => say2('itS_msg', t, bad), pmsg = (t, bad) => say2('itS_pmsg', t, bad);
+      $('itS_x').onclick = () => { clearInterval(tick); d.remove(); };
+      const esc2 = t => String(t || '').replace(/[<&"]/g, c => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' }[c]));
+      const thOf = sp => String((sp && sp.th) || '').split(/\s*·\s*/).filter(t => t && !/[㐀-鿿]/.test(t))[0] || '';
+      // ลิงก์สินค้า: id + skuId ปัจจุบันในแถบที่อยู่ (Taobao เปลี่ยน skuId ในลิงก์เมื่อกดเลือกตัวเลือก) · แก้เองได้ (แก้แล้วไม่ทับ)
+      const curLink = () => { const q = new URLSearchParams(location.search), sk = q.get('skuId') || q.get('skuid') || ''; return 'https://item.taobao.com/item.htm?id=' + x.itemId + (sk ? '&skuId=' + sk : ''); };
+      let linkEdited = false, tick = 0;
+      if (isItem) { $('itS_link').value = curLink(); $('itS_link').oninput = () => { linkEdited = true; };
+        tick = setInterval(() => { if (!document.body.contains(d)) return clearInterval(tick); if (!linkEdited && $('itS_link').value !== curLink()) $('itS_link').value = curLink(); }, 800); }
+      // ── ร้าน: เช็กร้านเดิม → เจอ = อัปเดตร้านนั้น · ไม่เจอ = เพิ่มใหม่ หรือค้นเลือกร้านเดิมที่จะทับ ──
+      let target = '', shops = [], matchTh = '';
+      const hd = (sp, by) => (sp.logo ? '<img src="' + esc2(sp.logo) + '" style="width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:4px">' : '') + '<b>' + esc2(sp.id) + '</b> ' + esc2(thOf(sp) || sp.th) + (by ? ' <span style="color:#667;font-size:12px">(' + esc2(by) + ')</span>' : '');
+      const setTarget = (id, sp, by) => { target = id; matchTh = thOf(sp);
+        const M = $('itS_match'); if (M) { M.style.background = id ? '#ecfdf3' : '#fff7ed'; M.style.color = '#1f2328';
+          M.innerHTML = (id ? '✅ ร้านเดิม: ' + hd(sp, by) : '🆕 ยังไม่มีร้านนี้ในระบบ') + '<div style="font-size:12px"><a href="#" id="itS_chg">' + (id ? 'ไม่ใช่ร้านนี้? เปลี่ยนร้าน' : 'เป็นร้านเดิมที่เปลี่ยนชื่อ/โลโก้? เลือกร้าน') + '</a></div>';
+          $('itS_chg').onclick = e => { e.preventDefault(); $('itS_pk').hidden = !$('itS_pk').hidden; if (!$('itS_pk').hidden) $('itS_q').focus(); }; }
+        if (id && !$('itS_th').value) $('itS_th').value = matchTh;
+        $('itS_go').textContent = id ? '💾 อัปเดตร้าน ' + id : '💾 เพิ่มร้านใหม่';
+        const P = $('itS_pshop'); if (P) P.innerHTML = id ? 'ร้าน: ' + hd(sp) : '<span style="color:#b42318">ร้านนี้ยังไม่อยู่ในระบบ – กด 💾 เพิ่มร้านใหม่ ในกล่อง ① ก่อน</span>';
+        const pg = $('itS_pgo'); if (pg) { pg.disabled = !id; pg.style.opacity = id ? 1 : .5; } };
+      const listShops = q => { const L = $('itS_ql'); if (!L) return; const k = String(q || '').toLowerCase().trim();
+        const hit = k ? shops.filter(sp => (sp.id + ' ' + sp.th + ' ' + sp.cn + ' ' + sp.url).toLowerCase().indexOf(k) >= 0).slice(0, 30) : [];
+        L.innerHTML = hit.map((sp, i) => '<div data-s="' + i + '" style="display:flex;gap:6px;align-items:center;padding:4px;border-bottom:1px dashed #ddd;cursor:pointer">' + (sp.logo ? '<img src="' + esc2(sp.logo) + '" style="width:26px;height:26px;object-fit:contain">' : '') + '<span><b>' + esc2(sp.id) + '</b> ' + esc2(sp.th) + (sp.cn ? ' · ' + esc2(sp.cn) : '') + '</span></div>').join('') || (k ? '<div style="color:#667">ไม่พบ</div>' : '');
+        L.querySelectorAll('[data-s]').forEach(el => el.onclick = () => { const sp = hit[+el.dataset.s]; $('itS_th').value = ''; setTarget(sp.id, sp, 'เลือกเอง'); L.innerHTML = ''; $('itS_q').value = ''; $('itS_pk').hidden = true; }); };
+      $('itS_q').oninput = () => listShops($('itS_q').value);
+      $('itS_new').onclick = e => { e.preventDefault(); $('itS_th').value = ''; setTarget('', null); $('itS_pk').hidden = true; };
+      post({ action: 'findShop', cn: x.cn, url: x.url, shopId: x.shopId, aliases: x.aliases }).then(r => {
+        shops = r.shops || []; if (r.match && r.match.id) setTarget(r.match.id, r.match, r.match.by); else setTarget('', null);
+      }).catch(e => { const M = $('itS_match'); if (M) M.innerHTML = '⚠️ เช็กร้านเดิมไม่ได้: ' + esc2(e.message) + ' (ถ้าเพิ่งอัปเดต Import Tracker ให้ Deploy New version ก่อน)'; });
+      $('itS_tr').onclick = async () => { const cn = $('itS_cn').value.trim(); if (!cn) return msg('ใส่ชื่อร้านภาษาจีนก่อน', true);
+        $('itS_tr').disabled = true; $('itS_tr').textContent = 'กำลังแปล…';
+        try { const r = await post({ action: 'translate', text: cn }); if (r.t) { $('itS_th').value = r.t; msg('แปลแล้ว – แก้ได้ก่อนกดบันทึก'); } else msg('แปลไม่ได้' + (r.err ? ': ' + r.err : ''), true); }
+        catch (e) { msg('❌ ' + e.message, true); }
+        $('itS_tr').disabled = false; $('itS_tr').textContent = '🔄 แปลใหม่'; };
+      if (!x.cn || !x.url) msg('อ่านชื่อ/ลิงก์ร้านจากหน้านี้ได้ไม่ครบ – กรอกเอง หรือเปิดหน้าร้าน (กดปุ่ม 进店) แล้วกดปุ่มอีกครั้ง', true);
+      // ① บันทึกร้านอย่างเดียว (ไม่ส่งราคา)
+      $('itS_go').onclick = async () => {
+        const body = { action: 'addShop', cn: $('itS_cn').value.trim(), thai: $('itS_th').value.trim(), url: $('itS_url').value.trim(), logo: x.logo || '', page: location.href.slice(0, 300),
+          shopId: x.shopId || '', aliases: x.aliases || [], target, replace: !!target };
+        if (!body.cn) return msg('ใส่ชื่อร้านภาษาจีนก่อน', true);
+        $('itS_go').disabled = true; msg('กำลังบันทึก… (~5–15 วิ)');
+        try {
+          const r = await post(body);
+          msg((r.existed ? '✅ อัปเดตร้าน ' + (r.dealerId || '') + (r.logoDone ? ' · ' + r.logoDone : '') + (r.renamed ? ' · ' + r.renamed : '') + (r.relinked ? ' · เปลี่ยนช่องร้านในชีต Product ' + r.relinked + ' ช่อง' : '') : '✅ เพิ่มร้านใหม่ ' + (r.dealerId || '')) + ' · ' + (r.thai || '') + (r.dealerRow ? ' (ชีต Dealer แถว ' + r.dealerRow + ')' : '') + (r.why ? ' · ⚠️ ' + r.why : ''), !!r.why);
+          if (!r.existed && r.dealerId) setTarget(r.dealerId, { id: r.dealerId, th: r.thai, logo: '' }, 'เพิ่งเพิ่ม');
+        } catch (e) { msg('❌ ' + e.message, true); }
+        $('itS_go').disabled = false;
+      };
+      if (!isItem) return;
+      // ② ราคา + ลิงก์สินค้า: หาสินค้าใน POS → เลือก → ราคา ¥ + ลิงก์ (skuId) → อัปเดต DealerPrice + ช่อง Dealer ในชีต Product
+      async function find(q) {
+        const L = $('itS_list'); if (!L) return; L.innerHTML = '<div style="color:#667;padding:4px 0">🔎 กำลังหา…</div>';
+        try {
+          const r = await post({ action: 'findItem', itemId: x.itemId, q: q || '' }), its = r.items || [];
+          if (!its.length) { L.innerHTML = '<div style="color:#667;padding:4px 0">' + (q ? 'ไม่พบ "' + esc2(q) + '" ใน POS' : 'ยังไม่มีสินค้าใน POS ที่ใช้ลิงก์นี้ – พิมพ์รหัส/ชื่อแล้วกด 🔎') + '</div>'; return; }
+          L.innerHTML = its.map((it, i) => '<div data-i="' + i + '" style="display:flex;gap:6px;align-items:center;padding:5px;border-bottom:1px dashed #cfdcf5;cursor:pointer">' +
+            (it.img ? '<img src="' + esc2(it.img) + '" style="width:32px;height:32px;object-fit:cover;border-radius:4px">' : '') + '<div style="flex:1;min-width:0"><b>' + esc2(it.sku) + '</b> ' + esc2(String(it.name).slice(0, 45)) +
+            '<div style="font-size:11.5px;color:#667">' + (it.prices.length ? 'ราคาเดิม ' + it.prices.map(p => esc2(p.src) + ' ¥' + p.cny + (p.date ? ' (' + p.date.slice(5) + ')' : '')).join(' · ') : esc2(it.why)) + '</div></div></div>').join('');
+          L.querySelectorAll('[data-i]').forEach(el => el.onclick = () => { const it = its[+el.dataset.i]; $('itS_sku').value = it.sku;
+            L.querySelectorAll('[data-i]').forEach(e2 => e2.style.background = ''); el.style.background = '#dbe8ff';
+            const o = it.prices[0]; pmsg('เลือก ' + it.sku + (o ? ' · ราคาเดิม ¥' + o.cny + ' → ใหม่ ¥' + ($('itS_cny').value || '?') : ' · ยังไม่มีราคาของร้านนี้') + ' · เช็กตัวเลือก/ลิงก์ แล้วกด 💲 อัปเดตราคา + ลิงก์'); });
+        } catch (e) { L.innerHTML = '<div style="color:#b42318">❌ ' + esc2(e.message) + '</div>'; }
+      }
+      $('itS_find').onclick = () => find($('itS_sku').value.trim()); $('itS_sku').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); find($('itS_sku').value.trim()); } }); if (x.itemId) find('');
+      $('itS_pgo').onclick = async () => {
+        const sku = $('itS_sku').value.trim(), cny = +$('itS_cny').value || 0, link = $('itS_link').value.trim();
+        if (!target) return pmsg('ร้านนี้ยังไม่อยู่ในระบบ – เพิ่มร้านในกล่อง ① ก่อน', true);
+        if (!sku) return pmsg('เลือก/ใส่รหัส POS ก่อน', true);
+        if (!(cny > 0)) return pmsg('ใส่ราคา ¥ ก่อน', true);
+        $('itS_pgo').disabled = true; pmsg('กำลังบันทึกราคา…');
+        try {
+          const r = await post({ action: 'updPrice', target, sku, cny, itemId: x.itemId, link, title: x.title });
+          pmsg('✅ ' + (r.priceMsg || 'บันทึกแล้ว') + (r.why ? ' · ⚠️ ' + r.why : ''), !!r.why);
+        } catch (e) { pmsg('❌ ' + e.message, true); }
+        $('itS_pgo').disabled = false;
+      };
+    }
+    const go = () => { ui(); setTimeout(ui, 3000); };
+    document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', go, { once: true }) : go();
+  }
 
   /* หน้า 已买到的宝贝 ส่งคำขอ mtop.taobao.order.queryboughtlistv2 เอง (เซ็นคำขอด้วยตัวของมันเอง)
      → สคริปต์ไม่สร้างคำขอเอง แค่อ่านผลที่หน้าเว็บได้รับ และเวลาดึงจะกดปุ่ม "หน้าถัดไป" ของหน้าเว็บเหมือนคนกด */

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.37
+// @version      3.38
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2203,7 +2203,9 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
   /* ================= 🏷️ หน้าพิมพ์ของ LnwShop (ใบจัดสินค้า): ใส่รหัส POS หน้าสินค้าทุกบรรทัด + เรียงตามรหัส POS =================
    * อ่านรหัสสินค้า LnwShop (ตัวเลขหน้าช่อง "รหัสสินค้า") → หารหัส POS จากคอลัมน์ AO ของชีต Product (ผ่าน Packing Cam)
    * แค่แต่งหน้าที่แสดงอยู่ ไม่กดพิมพ์ ไม่แก้ออเดอร์ · รหัสดึงใหม่ทุกครั้งที่เปิดหน้า (เซิร์ฟเวอร์จำไว้ 5 นาที) */
+  // ⛔ ปิดแล้ว (v3.38): ย้ายไปทำในส่วนเสริม Chrome "ฉลาก Lazada/Shopee" v0.6.0 (pick.js) ซึ่งเร็วกว่ามากตอนพิมพ์ทีละหลายใบ
   (async function lnwPrintPos() {
+    if (true) return;
     if (location.hostname !== 'a.lnwstore.com' || !/\/print\/preview\//.test(location.pathname)) return;
     let map = null, names = {}, skus = {}, err = '';
     try { const r = await api('posCodes', {}, true); map = r.map || {}; names = r.names || {}; skus = r.skus || {}; } catch (e) { err = e.message; }
