@@ -166,6 +166,7 @@ function openOrder(no) {
   if (!fin && (o.status === 'paid' || (!qr && o.status === 'new'))) act.push('<button class="btn pri" data-a="pack">📦 จัดของเสร็จ + ส่งรูปให้ลูกค้า</button>');
   if (o.status === 'packed') act.push(o.method === 'ship' ? '<button class="btn ok" data-a="ship">🚚 ส่งของแล้ว</button>' : '<button class="btn ok" data-a="got">✅ ลูกค้ารับของแล้ว' + (qr ? '' : ' + รับเงิน') + '</button>');
   if (!fin) act.push('<button class="btn bad" data-a="cancel">❌ ยกเลิก</button>');
+  act.push('<button class="btn" data-a="resend">📤 ส่ง LINE หาลูกค้า</button>');
   modal('<div class="mh"><h3>' + esc(o.no) + ' <span class="st ' + esc(o.status) + '">' + esc(ST_TH[o.status]) + '</span></h3><button class="btn" data-close>✕</button></div>' +
     '<div class="kv"><div>ลูกค้า</div><div><b>' + esc(o.name) + '</b> · <a href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a> · LINE: ' + esc(o.lineName) + '</div>' +
     '<div>รับสินค้า</div><div>' + (o.method === 'ship' ? '🚚 จัดส่ง' : '🏪 รับที่ร้าน') + '</div>' + (o.address ? '<div>ที่อยู่</div><div style="white-space:pre-line">' + esc(o.address) + ' <button class="btn" style="padding:2px 8px" onclick="navigator.clipboard.writeText(' + esc(JSON.stringify(o.name + ' ' + o.phone + '\n' + o.address)) + ').then(()=>toast(\'คัดลอกแล้ว\'))">📋 คัดลอก</button></div>' : '') +
@@ -202,6 +203,16 @@ function orderAct(o, a) {
     $('go').onclick = () => doStatus(o, { status: 'done', paid: o.pay === 'store', notify: $('nt').checked }, o.pay === 'store'); }
   if (a === 'cancel') { P.innerHTML = '<b>❌ ยกเลิกออเดอร์</b><label class="fld"><span>เหตุผล (ส่งให้ลูกค้า)</span><input id="rsn" placeholder="เช่น สินค้าหมด"></label>' + notify + '<div class="acts"><button class="btn bad" id="go">ยืนยันยกเลิก</button></div><div class="msg" id="pm"></div>';
     $('go').onclick = () => doStatus(o, { status: 'cancel', reason: $('rsn').value.trim(), notify: $('nt').checked }); }
+  if (a === 'resend') {
+    const pk = o.method === 'pickup', def = o.status === 'packed' ? (pk ? '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว พร้อมให้มารับที่ร้านครับ' + (o.pay === 'store' ? '\nยอดชำระที่ร้าน ฿' + fmt(o.total) : '') : '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว กำลังจัดส่งครับ') : 'ออเดอร์ ' + o.no + ' : ';
+    P.innerHTML = '<b>📤 ส่ง LINE หาลูกค้า</b> <span class="mut">(ไม่เปลี่ยนสถานะ)</span><label class="fld"><span>ข้อความ</span><textarea id="pmsg" rows="3">' + esc(def) + '</textarea></label>' +
+      (o.packImgs.length ? '<label style="display:block;margin:6px 0"><input type="checkbox" id="rimg" checked> แนบรูปจัดของ (' + o.packImgs.length + ' รูป)</label>' : '') +
+      '<div class="acts"><button class="btn pri" id="go">📤 ส่ง</button></div><div class="msg" id="pm"></div>';
+    $('go').onclick = async () => { const b = $('go'), m = $('pm'); b.disabled = true; m.className = 'msg'; m.textContent = 'กำลังส่ง…';
+      try { const r = await api({ action: 'aResend', no: o.no, msg: $('pmsg').value, imgs: !!($('rimg') && $('rimg').checked) });
+        if (r.ok) { m.className = 'msg'; m.textContent = '✅ ส่งให้ลูกค้าแล้ว'; toast('ส่ง LINE แล้ว'); } else { m.className = 'msg bad'; m.textContent = '⚠️ ส่งไม่สำเร็จ: ' + r.err; }
+      } catch (e) { m.className = 'msg bad'; m.textContent = e.message; } b.disabled = false; };
+  }
   P.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 async function doStatus(o, body, thenCut) {
