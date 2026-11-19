@@ -887,6 +887,7 @@ async function openMag() {
   magTx = magTy = 0;
   setFrozen(false);
   applyMagZoom();
+  if (trackCaps().torch && !torchOn) setTorch(true, true);   // 🔦 เปิดไฟฉายทันทีที่เข้าแว่นขยาย (ปิดเองตอนออก)
 }
 
 async function closeMag() {
@@ -918,14 +919,14 @@ function updateMagTransform() {
   $('magFreeze').style.transform = t;
 }
 
-async function setTorch(on) {
+async function setTorch(on, quiet) {
   if (!track) return;
   try {
     await track.applyConstraints({ advanced: [{ torch: on }] });
     torchOn = on;
   } catch (e) {
     torchOn = false;
-    if (on) alert('สั่งเปิดไฟฉายไม่สำเร็จ');
+    if (on && !quiet) alert('สั่งเปิดไฟฉายไม่สำเร็จ');
   }
   $('magTorch').classList.toggle('on', torchOn);
 }
@@ -1022,16 +1023,26 @@ async function initDetector() {
   }
 }
 
+/* กันอ่านมั่ว: ลายคีย์บอร์ด/ตัวหนังสือบางทีถูกอ่านเป็นบาร์โค้ดสั้นๆ เช่น "A6A" (มักเป็นแบบ codabar / code39 / upc_e)
+ * เลขพัสดุ/เลขออเดอร์จริงยาว 8 ตัวขึ้นไป → สั้นกว่านั้นไม่รับ · แบบที่อ่านพลาดง่าย (codabar/itf/upc/ean8) ต้องยาว 10 ตัวขึ้นไป */
+function codeOk(v, fmt) {
+  const c = String(v || '').trim();
+  if (!/^[A-Za-z0-9\-_]{8,40}$/.test(c)) return false;
+  if (/codabar|itf|upc|ean_8/i.test(fmt || '') && c.length < 10) return false;
+  return /\d/.test(c);   // ต้องมีตัวเลขอย่างน้อย 1 ตัว
+}
 async function detectOn(canvas, hard) {
   try {
     if (detector) {
       const r = await detector.detect(canvas);
-      return r.length ? r[0].rawValue : '';
+      const ok = r.find(x => codeOk(x.rawValue, x.format));
+      return ok ? ok.rawValue : '';
     }
     if (zxFast) {
       const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
       const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
-      return (hard ? zxHard : zxFast).decodeWithState(bmp).getText();
+      const t = (hard ? zxHard : zxFast).decodeWithState(bmp).getText();
+      return codeOk(t) ? t : '';
     }
   } catch (e) {}
   return '';
