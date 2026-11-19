@@ -103,7 +103,7 @@ a{color:var(--c)}
 
 <script>
 /* ===== C-Store หน้าแอดมิน · cs-v1119a · ใส่ลิงก์ Web app เดียวกับ index.html ===== */
-const CS_API = 'PASTE_WEB_APP_URL_HERE';
+const CS_API = 'https://script.google.com/macros/s/AKfycbwMV4lEBh4DJDtiCoCkaVEfcz6vxf5WCptzjB2FuHBNKqfYbgJUnAD_yS0kvKwD9dMEIA/exec';
 const API = (function () { try { return localStorage.getItem('cs_api') || CS_API; } catch (e) { return CS_API; } })();
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
