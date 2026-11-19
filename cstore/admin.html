@@ -103,7 +103,7 @@ a{color:var(--c)}
 
 <script>
 /* ===== C-Store หน้าแอดมิน · cs-v1119a · ใส่ลิงก์ Web app เดียวกับ index.html ===== */
-const CS_API = 'https://script.google.com/macros/s/AKfycbwMV4lEBh4DJDtiCoCkaVEfcz6vxf5WCptzjB2FuHBNKqfYbgJUnAD_yS0kvKwD9dMEIA/exec';
+const CS_API = 'PASTE_WEB_APP_URL_HERE';
 const API = (function () { try { return localStorage.getItem('cs_api') || CS_API; } catch (e) { return CS_API; } })();
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -185,7 +185,7 @@ function openOrder(no) {
 }
 function orderAct(o, a) {
   const P = $('pan'); P.hidden = false;
-  const notify = '<label style="display:block;margin:6px 0"><input type="checkbox" id="nt" checked> แจ้งลูกค้าทาง LINE</label>';
+  const notify = '<label style="display:block;margin:6px 0"><input type="checkbox" id="nt"> แจ้งลูกค้าทาง LINE (ติ๊กเฉพาะคนที่ต้องการส่ง)</label>';
   if (a === 'paid') { P.innerHTML = '<b>💰 ยืนยันรับเงิน ฿' + fmt(o.total) + '</b>' + notify + '<div class="acts"><button class="btn ok" id="go">ยืนยัน</button></div><div class="msg" id="pm"></div>';
     $('go').onclick = () => doStatus(o, { status: 'paid', notify: $('nt').checked }, true); }
   if (a === 'pack') {
