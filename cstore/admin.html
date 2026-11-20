@@ -322,7 +322,7 @@ function renderDesign() {
   const f = (k, lbl, ph, type) => '<label class="fld"><span>' + lbl + '</span><input data-k="' + k + '" type="' + (type || 'text') + '" value="' + esc(getK(k)) + '" placeholder="' + esc(ph || '') + '"></label>';
   const t = (k, lbl, ph) => '<label class="fld"><span>' + lbl + '</span><textarea data-k="' + k + '" rows="3" placeholder="' + esc(ph || '') + '">' + esc(getK(k)) + '</textarea></label>';
   const cb = (k, lbl) => '<label style="display:block;margin:6px 0"><input type="checkbox" data-k="' + k + '"' + (getK(k) ? ' checked' : '') + '> ' + lbl + '</label>';
-  $('t-design').innerHTML = '<div class="design"><div>' +
+  $('t-design').innerHTML = '<div class="design"><div>' + posterCard() +
     '<div class="card"><h2>🏪 ชื่อ / โลโก้ / สี</h2><div class="g2">' + f('name', 'ชื่อร้าน') + f('tagline', 'คำโปรย') + '</div>' +
     '<div class="bar"><div class="ph" id="logoPv" style="width:56px;height:56px;border-radius:12px;background:#eef1f4 center/cover;background-image:url(&quot;' + esc(imgUrl(D.logo)) + '&quot;)"></div><button class="btn" id="logoUp">📷 เปลี่ยนโลโก้</button><button class="btn" id="logoX">ลบ</button>' +
     '<label class="fld" style="margin-left:auto"><span>สีหลัก</span><input type="color" data-k="color" value="' + esc(D.color || '#1f6feb') + '"></label></div>' +
@@ -343,7 +343,160 @@ function renderDesign() {
   $('logoX').onclick = () => { D.logo = ''; $('logoPv').style.backgroundImage = ''; pushPreview(); };
   $('banAdd').onclick = () => upImg(async d => { const r = await api({ action: 'aBanner', img: d }); (D.banners = D.banners || []).push({ img: r.url, link: '' }); renderBans(); pushPreview(); }, 1600);
   $('dSave').onclick = saveDesign;
+  posterInit();
 }
+/* ---------- 🔗 ลิงก์หน้าร้าน + ป้าย QR พร้อมพิมพ์ (A5 · หลายแบบ) ---------- */
+const PST = { style: 0, head: 'สแกนสั่งสินค้า', sub: 'ดูราคา · เช็คสต็อก · สั่งไว้แล้วมารับที่ร้าน', logo: null, logoFor: '' };
+const PSTYLES = [
+  { id: 'brand', name: 'สีร้าน' }, { id: 'line', name: 'LINE เขียว' }, { id: 'clean', name: 'ขาวเรียบ' },
+  { id: 'dark', name: 'เข้ม' }, { id: 'bold', name: 'ตัวใหญ่' }, { id: 'tent', name: 'พับตั้งโต๊ะ (A4 พับครึ่ง)' }
+];
+const shopUrl = () => STORE && STORE.liffId ? 'https://liff.line.me/' + STORE.liffId : '';
+function posterCard() {
+  const u = shopUrl();
+  return '<div class="card" id="pCard"><h2>🔗 ลิงก์หน้าร้าน + ป้าย QR</h2>' +
+    (u ? '<div class="bar"><input readonly value="' + esc(u) + '" style="flex:1;min-width:0" id="shopUrl"><button class="btn" id="cpUrl">📋 คัดลอก</button><a class="btn" href="' + esc(u) + '" target="_blank">เปิด</a></div>' +
+      '<div class="mut">ใช้ลิงก์นี้ใน Rich menu · โพสต์ · ส่งให้ลูกค้า · ลูกค้าสแกนครั้งแรกระบบจะชวนเพิ่มเพื่อน LINE OA ให้</div>' +
+      '<div class="g2" style="margin-top:8px"><label class="fld"><span>หัวข้อบนป้าย</span><input id="pHead" value="' + esc(PST.head) + '"></label><label class="fld"><span>ข้อความรอง</span><input id="pSub" value="' + esc(PST.sub) + '"></label></div>' +
+      '<div class="mut">เลือกแบบ (ใช้ชื่อร้าน โลโก้ สี ที่อยู่ เวลาเปิด จากหน้านี้ — แก้แล้วกดบันทึกหน้าร้านก่อน)</div>' +
+      '<div id="pGal" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:8px 0"></div>' +
+      '<div class="bar"><button class="btn pri" id="pDl">⬇️ ดาวน์โหลดรูป (PNG พิมพ์ได้คมชัด)</button><button class="btn" id="pPr">🖨 พิมพ์ / บันทึก PDF</button></div><div class="msg" id="pMsg"></div>'
+      : '<div class="msg bad">ใส่ LIFF ID ในช่องด้านล่าง (📝 ท้ายร้าน + LINE) แล้วกดบันทึกหน้าร้านก่อน จึงจะมีลิงก์และป้าย QR</div>') + '</div>';
+}
+async function posterInit() {
+  if (!shopUrl()) return;
+  $('cpUrl').onclick = () => navigator.clipboard.writeText(shopUrl()).then(() => toast('คัดลอกลิงก์แล้ว'));
+  $('pHead').oninput = e => { PST.head = e.target.value; posterGallery(); };
+  $('pSub').oninput = e => { PST.sub = e.target.value; posterGallery(); };
+  $('pDl').onclick = posterDownload; $('pPr').onclick = posterPrint;
+  $('pGal').innerHTML = '<div class="mut">กำลังเตรียมป้าย…</div>';
+  try {
+    await new Promise((ok, no) => { if (window.QRLib) return ok(); const s = document.createElement('script'); s.src = 'qrlib.js'; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+    if (!document.getElementById('pFont')) { const l = document.createElement('link'); l.id = 'pFont'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;800&display=swap'; document.head.appendChild(l); }
+    await Promise.race([Promise.all(['800 40px Prompt', '600 40px Prompt', '400 40px Prompt'].map(f => document.fonts.load(f, 'สั่งสินค้า'))), new Promise(r => setTimeout(r, 4000))]);
+    if (STORE.logo && PST.logoFor !== STORE.logo) {   // โลโก้ผ่านระบบ (กันปัญหารูปข้ามโดเมนทำให้ดาวน์โหลดไม่ได้)
+      PST.logoFor = STORE.logo; PST.logo = null;
+      try { const r = await api({ action: 'aImgData', url: STORE.logo }); if (r.img) PST.logo = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = r.img; }); } catch (e) { }
+    }
+  } catch (e) { }
+  posterGallery();
+}
+function posterGallery() {
+  const G = $('pGal'); if (!G) return; G.innerHTML = '';
+  PSTYLES.forEach((s, i) => {
+    const tent = s.id === 'tent', W = tent ? 200 : 141, H = tent ? 283 : 200;
+    const c = document.createElement('canvas'); c.width = W * 2; c.height = H * 2; drawPoster(c, s.id);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn'; b.style.cssText = 'display:block;padding:4px;text-align:center;' + (i === PST.style ? 'outline:3px solid var(--c);' : '');
+    c.style.cssText = 'width:100%;height:auto;display:block;border-radius:6px;box-shadow:0 1px 3px #0003';
+    b.appendChild(c); const t = document.createElement('div'); t.className = 'mut'; t.textContent = s.name; b.appendChild(t);
+    b.onclick = () => { PST.style = i; posterGallery(); }; G.appendChild(b);
+  });
+}
+function qrMatrix(text) { const q = new window.QRLib.QRCode(-1, window.QRLib.QRErrorCorrectLevel.Q); q.addData(text); q.make(); return q; }
+function drawQR(x, q, X, Y, S, fg) {
+  const n = q.getModuleCount(), m = S / n; x.fillStyle = fg || '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) x.fillRect(Math.floor(X + c * m), Math.floor(Y + r * m), Math.ceil(m), Math.ceil(m));
+}
+function rrect(x, X, Y, W, H, R) { x.beginPath(); x.moveTo(X + R, Y); x.arcTo(X + W, Y, X + W, Y + H, R); x.arcTo(X + W, Y + H, X, Y + H, R); x.arcTo(X, Y + H, X, Y, R); x.arcTo(X, Y, X + W, Y, R); x.closePath(); }
+function fitText(x, t, maxW, size, weight) { let s = size; do { x.font = weight + ' ' + s + 'px Prompt, "Noto Sans Thai", Thonburi, "Leelawadee UI", Tahoma, sans-serif'; if (x.measureText(t).width <= maxW) break; s *= 0.94; } while (s > 8); return s; }
+function wrapLines(x, t, maxW) {
+  const seg = window.Intl && Intl.Segmenter ? [...new Intl.Segmenter('th', { granularity: 'word' }).segment(t)].map(z => z.segment) : [...t];
+  const out = []; let line = ''; seg.forEach(w => { const n = line + w; if (x.measureText(n).width > maxW && line) { out.push(line.trim()); line = w.trimStart(); } else line = n; }); if (line.trim()) out.push(line.trim()); return out;
+}
+function drawLogo(x, cx, cy, r, ring) {
+  x.save(); x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fillStyle = '#fff'; x.fill(); if (ring) { x.lineWidth = r * 0.08; x.strokeStyle = ring; x.stroke(); }
+  x.clip();
+  if (PST.logo) { const im = PST.logo, k = Math.max(2 * r / im.width, 2 * r / im.height); x.drawImage(im, cx - im.width * k / 2, cy - im.height * k / 2, im.width * k, im.height * k); }
+  else { const t = ((STORE.name || 'C').match(/[A-Za-z0-9ก-ฮ]/) || ['C'])[0].toUpperCase(); x.fillStyle = (STORE.color || '#1f6feb'); fitText(x, t, r * 1.4, r * 1.1, 800); x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(t, cx, cy + r * 0.05); }
+  x.restore();
+}
+/* วาดป้ายลงใน canvas (A5 แนวตั้ง 148×210 มม. · tent = A4 แนวตั้ง 2 หน้า กลับหัวด้านบน) */
+function drawPoster(c, style) {
+  const x = c.getContext('2d'), W = c.width, H = c.height;
+  if (style === 'tent') {   // A4: ครึ่งบนกลับหัว + ครึ่งล่าง → พับครึ่งตั้งเป็นสามเหลี่ยม เห็นทั้งสองด้าน
+    const h = Math.round(H / 2), sub = document.createElement('canvas'); sub.width = W; sub.height = h; drawFace(sub, 'brand', true);
+    x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+    x.save(); x.translate(W, h); x.rotate(Math.PI); x.drawImage(sub, 0, 0); x.restore(); x.drawImage(sub, 0, h);
+    x.setLineDash([W / 60, W / 60]); x.strokeStyle = '#999'; x.lineWidth = Math.max(1, W / 500); x.beginPath(); x.moveTo(0, h); x.lineTo(W, h); x.stroke(); x.setLineDash([]);
+    x.fillStyle = '#999'; fitText(x, '✂ พับตามเส้นประ', W * 0.3, W * 0.022, 400); x.textAlign = 'right'; x.textBaseline = 'bottom'; x.fillText('พับตามเส้นประ', W * 0.97, h - W * 0.006);
+    return;
+  }
+  drawFace(c, style, false);
+}
+function drawFace(c, style, wide) {
+  const x = c.getContext('2d'), W = c.width, H = c.height, u = Math.min(W, H * 0.705) / 100, col = STORE.color || '#1f6feb', name = STORE.name || 'C-Store';
+  const P = { brand: { bg: col, fg: '#fff', card: '#fff', qr: '#111', acc: '#fff', sub: 'rgba(255,255,255,.9)' },
+    line: { bg: '#06C755', fg: '#fff', card: '#fff', qr: '#111', acc: '#fff', sub: 'rgba(255,255,255,.92)' },
+    clean: { bg: '#fff', fg: '#111', card: '#fff', qr: '#111', acc: col, sub: '#555' },
+    dark: { bg: '#0f172a', fg: '#fff', card: '#fff', qr: '#0f172a', acc: col, sub: '#cbd5e1' },
+    bold: { bg: '#fff', fg: col, card: '#fff', qr: '#111', acc: col, sub: '#333' } }[style];
+  x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+  x.fillStyle = P.bg; x.fillRect(0, 0, W, H);
+  if (style === 'clean') { x.strokeStyle = col; x.lineWidth = u * 1.6; rrect(x, u * 3, u * 3, W - u * 6, H - u * 6, u * 4); x.stroke(); }
+  if (style === 'dark') { x.fillStyle = col; x.fillRect(0, 0, W, u * 2.2); x.fillRect(0, H - u * 2.2, W, u * 2.2); }
+  if (style === 'bold') { x.fillStyle = col; x.fillRect(0, 0, W, H * 0.30); }
+  const q = qrMatrix(shopUrl());
+  // ส่วนหัว: โลโก้ + ชื่อร้าน
+  let y = wide ? H * 0.09 : H * 0.075;
+  const lr = (wide ? 7 : 8.5) * u;
+  if (wide) {
+    drawLogo(x, W * 0.5 - fitWidth() / 2 - lr * 0.4, y + lr * 0.2, lr, style === 'clean' || style === 'bold' ? col : null);
+    function fitWidth() { fitText(x, name, W * 0.55, 7 * u, 800); return x.measureText(name).width; }
+    x.fillStyle = P.fg; fitText(x, name, W * 0.55, 7 * u, 800); x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillText(name, W * 0.5 - fitWidth() / 2 + lr * 0.9, y + lr * 0.2); x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+    y += lr * 1.6;
+  } else {
+    drawLogo(x, W / 2, y + lr, lr, style === 'clean' || style === 'bold' ? col : (style === 'dark' ? col : null));
+    y += lr * 2 + u * 7;
+    x.fillStyle = style === 'bold' ? '#fff' : P.fg; fitText(x, name, W * 0.84, 7.5 * u, 800); x.fillText(name, W / 2, y); y += u * 4;
+    if (STORE.tagline) { x.fillStyle = style === 'bold' ? 'rgba(255,255,255,.9)' : P.sub; fitText(x, STORE.tagline, W * 0.84, 3.6 * u, 400); x.fillText(STORE.tagline, W / 2, y + u * 1.5); }
+    y += u * 7;
+  }
+  // หัวข้อชวนสแกน
+  const hs = style === 'bold' ? 12 : 9.5;
+  x.fillStyle = style === 'bold' ? col : P.fg; fitText(x, PST.head, W * 0.88, hs * u, 800);
+  if (style === 'bold') y = Math.max(y, H * 0.30 + hs * u * 1.15);
+  else y += hs * u * 0.55;
+  x.fillText(PST.head, W / 2, y); y += u * 3.5;
+  // การ์ด QR — กันที่ด้านล่างไว้ก่อน (ข้อความรอง + ป้าย LINE + ที่อยู่/เวลา) แล้วให้ QR ใหญ่สุดเท่าที่เหลือ
+  const pk = STORE.pickup || {}, foot = [pk.hours ? '🕘 ' + pk.hours : '', pk.phone ? '☎ ' + pk.phone : ''].filter(Boolean).join('   ');
+  fitText(x, 'x', W, 4.2 * u, 600); const subL = wrapLines(x, PST.sub, W * 0.86).slice(0, 2);
+  const footN = (foot ? 1 : 0) + (pk.addr && !wide ? 1 : 0);
+  const footH = u * 6 + subL.length * u * 5.6 + (wide ? 0 : u * 11) + footN * u * 4.6 + u * 4, avail = H - y - footH;
+  const S = Math.min(W * (wide ? 0.42 : 0.62), avail - u * 9), pad = u * 3.5, cw = S + pad * 2, ch = S + pad * 2;
+  const cx = (W - cw) / 2, cy = y + u * 2;
+  x.save(); x.shadowColor = 'rgba(0,0,0,.18)'; x.shadowBlur = u * 3; x.shadowOffsetY = u * 0.8; x.fillStyle = P.card; rrect(x, cx, cy, cw, ch, u * 4); x.fill(); x.restore();
+  if (style === 'clean' || style === 'bold') { x.strokeStyle = col; x.lineWidth = u * 0.8; rrect(x, cx, cy, cw, ch, u * 4); x.stroke(); }
+  drawQR(x, q, cx + pad, cy + pad, S, P.qr);
+  y = cy + ch + u * 7;
+  // ข้อความรอง
+  x.fillStyle = P.sub; fitText(x, 'x', W, 4.2 * u, 600);
+  subL.forEach(l => { x.fillText(l, W / 2, y); y += u * 5.6; });
+  // ป้าย "เปิดใน LINE"
+  if (!wide) {
+    const bt = 'กล้องมือถือ หรือ LINE สแกนได้เลย', bs = fitText(x, bt, W * 0.7, 3.4 * u, 600), bw = x.measureText(bt).width + u * 8, bh = u * 7.4, by = y - u * 1.5;
+    x.fillStyle = style === 'line' ? '#fff' : '#06C755'; rrect(x, (W - bw) / 2, by, bw, bh, bh / 2); x.fill();
+    x.fillStyle = style === 'line' ? '#06C755' : '#fff'; x.textBaseline = 'middle'; x.fillText(bt, W / 2, by + bh / 2 + u * 0.2); x.textBaseline = 'alphabetic';
+    y = by + bh + u * 3;
+  }
+  // ท้าย: ที่อยู่ / เวลาเปิด / โทร
+  x.fillStyle = P.sub; let fy = H - (style === 'dark' ? u * 6 : u * 5.5);
+  if (foot) { fitText(x, foot, W * 0.88, 3.3 * u, 400); x.fillText(foot, W / 2, fy); fy -= u * 4.6; }
+  if (pk.addr && !wide) { fitText(x, pk.addr, W * 0.88, 3.1 * u, 400); x.fillText(pk.addr, W / 2, fy); }
+}
+function posterCanvas() {
+  const s = PSTYLES[PST.style], tent = s.id === 'tent', c = document.createElement('canvas');
+  c.width = tent ? 2480 : 1748; c.height = tent ? 3508 : 2480; drawPoster(c, s.id); return { c, s, tent };
+}
+function posterDownload() {
+  try { const { c, s } = posterCanvas(); c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'ป้ายQR-' + (STORE.name || 'C-Store') + '-' + s.name.replace(/[^\wก-๙]+/g, '') + '.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); $('pMsg').textContent = '✅ ดาวน์โหลดแล้ว · พิมพ์ขนาด ' + (s.id === 'tent' ? 'A4' : 'A5') + ' (เลือก "พอดีหน้ากระดาษ")'; }, 'image/png'); }
+  catch (e) { $('pMsg').className = 'msg bad'; $('pMsg').textContent = 'ดาวน์โหลดไม่ได้: ' + e.message; }
+}
+function posterPrint() {
+  const { c, tent } = posterCanvas(), w = window.open('', '_blank'); if (!w) return toast('เบราว์เซอร์บล็อกหน้าต่าง – อนุญาตป๊อปอัปก่อน', 5000);
+  w.document.write('<!doctype html><title>ป้าย QR</title><style>@page{size:' + (tent ? 'A4' : 'A5') + ' portrait;margin:0}html,body{margin:0}img{width:100vw;height:100vh;object-fit:contain;display:block}</style><img src="' + c.toDataURL('image/png') + '" onload="setTimeout(()=>print(),300)">');
+  w.document.close();
+}
+
 function getK(k) { return k.split('.').reduce((o, x) => (o == null ? '' : o[x]), D) ?? ''; }
 function setK(k, v) { const p = k.split('.'); let o = D; for (let i = 0; i < p.length - 1; i++) o = o[p[i]] = o[p[i]] || {}; o[p[p.length - 1]] = v; }
 function pushPreview() { LS.set('cs_preview', D); }
@@ -358,7 +511,7 @@ function renderBans() {
 }
 async function saveDesign() {
   const m = $('dMsg'), b = $('dSave'); b.disabled = true; m.className = 'msg'; m.textContent = 'กำลังบันทึก…';
-  try { const r = await api({ action: 'aSaveStore', store: D }); STORE = r.store; await api({ action: 'aRefresh' }); m.className = 'msg ok'; m.textContent = '✅ บันทึกแล้ว ลูกค้าเห็นหน้าใหม่ภายในไม่กี่วินาที'; } catch (e) { m.className = 'msg bad'; m.textContent = e.message; }
+  try { const r = await api({ action: 'aSaveStore', store: D }); STORE = r.store; const pc = $('pCard'); if (pc) { pc.outerHTML = posterCard(); posterInit(); } await api({ action: 'aRefresh' }); m.className = 'msg ok'; m.textContent = '✅ บันทึกแล้ว ลูกค้าเห็นหน้าใหม่ภายในไม่กี่วินาที'; } catch (e) { m.className = 'msg bad'; m.textContent = e.message; }
   b.disabled = false;
 }
 
