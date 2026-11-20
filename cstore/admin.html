@@ -111,8 +111,8 @@ const fmt = n => (Math.round(n * 100) / 100).toLocaleString('th-TH', { maximumFr
 const LS = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } } };
 let KEY = LS.get('cs_key', ''), STORE = null, SYS = null, ORD = [], OF = 'open', CATA = null;
 const ST_TH = { new: 'รอดำเนินการ', slip: 'ส่งสลิปแล้ว', paid: 'ชำระแล้ว', packed: 'จัดของเสร็จ', done: 'เสร็จสิ้น', cancel: 'ยกเลิก' };
-async function api(body) {
-  const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ key: KEY }, body)) });
+async function api(body, signal) {
+  const r = await fetch(API, { method: 'POST', signal, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ key: KEY }, body)) });
   const j = await r.json(); if (!j.ok) throw new Error(j.error || j.err || 'เกิดข้อผิดพลาด'); return j;
 }
 function toast(t, ms) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(el._t); el._t = setTimeout(() => { el.hidden = true; }, ms || 2500); }
@@ -224,14 +224,26 @@ async function doStatus(o, body, thenCut) {
 }
 async function stockCut(o) {
   const M = $('cutMsg'); if (M) M.textContent = 'กำลังเตรียมรายการ…';
-  try { const r = await api({ action: 'aStockItems', no: o.no });
-    if (!r.base) { M.innerHTML = '⚠️ ยังไม่ได้ตั้ง "ลิงก์แก้ Stock LnwShop" ที่แท็บ ⚙ ระบบ'; return; }
+  const base = (SYS && SYS.lnwUrl) || '';
+  if (!base) { M.innerHTML = '⚠️ ยังไม่ได้ตั้ง "ลิงก์แก้ Stock LnwShop" ที่แท็บ ⚙ ระบบ (คัดลอกจาก POS)'; return; }
+  // เปิดหน้าต่างไว้ก่อนทันทีที่กด (Safari/มือถือจะบล็อกถ้าเปิดหลังรอข้อมูล)
+  let w = null; try { w = window.open('', 'cstore-lnw'); if (w) w.document.write('<p style="font:16px sans-serif;padding:20px">กำลังเปิด LnwShop…</p>'); } catch (e) { }
+  try {
+    let r;
+    if (CATA && CATA.items) {   // มีรายการสินค้าในเครื่องแล้ว → ไม่ต้องรอระบบ
+      const pm = {}; CATA.items.forEach(it => { const k = String(it.s).toUpperCase().replace(/\s+/g, ''); if (it.pid && !pm[k]) pm[k] = it.pid; });
+      r = { base, items: o.items.map(l => ({ s: l.s, n: l.n, q: l.q, pid: pm[String(l.s).toUpperCase().replace(/\s+/g, '')] || '' })) };
+    } else {
+      const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 30000);
+      try { r = await api({ action: 'aStockItems', no: o.no }, ac.signal); } catch (e) { throw new Error(e.name === 'AbortError' ? 'ระบบตอบช้าเกิน 30 วินาที – กดเปิด LnwShop ตัด Stock อีกครั้ง' : e.message); } finally { clearTimeout(tm); }
+      r.base = r.base || base;
+    }
     const ok = r.items.filter(i => i.pid), miss = r.items.filter(i => !i.pid), q = {}; ok.forEach(i => { q[i.pid] = (q[i.pid] || 0) + i.q; });
-    const pids = Object.keys(q); if (!pids.length) { M.textContent = '⚠️ สินค้าในออเดอร์ไม่มีรหัส LnwShop (คอลัมน์ AO) – ตัด Stock เอง'; return; }
+    const pids = Object.keys(q); if (!pids.length) { if (w && !w.closed) w.close(); M.textContent = '⚠️ สินค้าในออเดอร์ไม่มีรหัส LnwShop (คอลัมน์ AO) – ตัด Stock เอง'; return; }
     const url = r.base + pids.map(encodeURIComponent).join(',') + '#pos=' + pids.map(p => encodeURIComponent(p) + ':' + q[p]).join(',');
-    window.open(url, 'cstore-lnw');
+    if (w && !w.closed) w.location.href = url; else window.open(url, 'cstore-lnw');
     M.innerHTML = 'เปิด LnwShop แล้ว: ' + ok.map(i => esc(i.s) + ' −' + i.q).join(' · ') + (miss.length ? '<br><span style="color:var(--bad)">⚠️ ไม่มีรหัส LnwShop (ตัดเอง): ' + miss.map(i => esc(i.s) + ' ×' + i.q).join(', ') + '</span>' : '') + '<br>กดบันทึกใน LnwShop แล้วกลับมากด ✔ ตัดเสร็จแล้ว';
-  } catch (e) { if (M) M.textContent = '❌ ' + e.message; }
+  } catch (e) { if (w && !w.closed) w.close(); if (M) M.textContent = '❌ ' + e.message; }
 }
 
 /* ---------- 🛍 สินค้า (แสดง/ซ่อน · รูป · แนะนำ) ---------- */
