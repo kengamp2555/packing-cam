@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.39
+// @version      3.42
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2206,18 +2206,39 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
       busy = true; lastRun = Date.now();
       try {
         const st = await api('feeInvoiceState', { platform: 'Shopee', shop });
-        let from = st.next, to = addDay(ymd(new Date()), -3), n = 0, days = 0;   // ถึง 3 วันก่อน (เผื่อ Shopee ออกใบ/ยอดช้า · วันที่ดึงแล้วจะไม่ดึงซ้ำ)
-        if (from > to) { say('✅ [' + shop + '] ภาษีซื้อ Shopee ครบถึง ' + st.last + ' แล้ว · เช็กใหม่อีก 3 ชม. · ' + new Date().toTimeString().slice(0, 5)); busy = false; return; }
+        let from = st.next, to = addDay(ymd(new Date()), -3), n = 0, ne = 0, days = 0;   // ถึง 3 วันก่อน (เผื่อ Shopee ออกใบ/ยอดช้า · วันที่ดึงแล้วจะไม่ดึงซ้ำ)
+        if (from > to) { const dr = await runDocs(shop);
+          say('✅ [' + shop + '] ภาษีซื้อ/ค่าส่ง SPX ครบถึง ' + st.last + ' แล้ว' + (dr.ok || dr.bad ? ' · PDF +' + dr.ok + (dr.bad ? ' (ไม่ได้ ' + dr.bad + ': ' + dr.why + ')' : '') : '') + ' · เช็กใหม่อีก 3 ชม. · ' + new Date().toTimeString().slice(0, 5), dr.bad && !dr.ok); busy = false; return; }
         while (from <= to) {
           const end = [addDay(from, 30), to].sort()[0];
           say('🧾 [' + shop + '] ดึงใบกำกับ ' + from + ' → ' + end + '…');
           const rows = rowsOf(await get('/api/v1/seller/invoices/me?since=' + from + '&until=' + end));
           const r = await api('feeInvoices', { platform: 'Shopee', shop, rows, until: end });
-          n += r.added; days += Math.round((new Date(end) - new Date(from)) / 864e5) + 1; from = addDay(end, 1);
+          n += r.added; ne += r.expAdded || 0; days += Math.round((new Date(end) - new Date(from)) / 864e5) + 1; from = addDay(end, 1);
         }
-        say('✅ [' + shop + '] ภาษีซื้อ Shopee: เพิ่ม ' + n + ' ใบ (' + days + ' วัน) ครบถึง ' + to + ' · เช็กใหม่อีก 3 ชม. · ' + new Date().toTimeString().slice(0, 5));
+        const dr = await runDocs(shop);
+        say('✅ [' + shop + '] ภาษีซื้อ Shopee +' + n + ' ใบ · ค่าใช้จ่าย SPX +' + ne + ' ใบ (' + days + ' วัน) ครบถึง ' + to + ' · PDF +' + dr.ok + (dr.bad ? ' (ไม่ได้ ' + dr.bad + ': ' + dr.why + ')' : '') + (dr.left ? ' · เหลือ ' + dr.left + ' (รอบหน้า)' : '') + ' · ' + new Date().toTimeString().slice(0, 5), dr.bad && !dr.ok);
       } catch (e) { say('❌ ' + e.message, 1); lastRun = Date.now() - EVERY + 10 * 60e3; }   // ไม่สำเร็จ → ลองใหม่ใน 10 นาที
       busy = false;
+    }
+    // ไฟล์ PDF ของแต่ละใบ (วันละใบ ต่อชนิด) ที่ยังไม่มีใน Drive → ขอลิงก์ดาวน์โหลดจาก e-Tax → เก็บเข้า Drive แล้วผูกกับรายการ
+    const findUrl = o => { if (typeof o === 'string') return /^https?:\/\//.test(o) ? o : ''; if (o && typeof o === 'object') for (const k of Object.keys(o)) { const u = findUrl(o[k]); if (u) return u; } return ''; };
+    const fetchBlob = url => new Promise((res, rej) => GM_xmlhttpRequest({ method: 'GET', url, responseType: 'blob', onload: r => r.status < 300 ? res(r.response) : rej(new Error('HTTP ' + r.status)), onerror: () => rej(new Error('ดาวน์โหลดไฟล์ไม่ได้')) }));
+    async function runDocs(shop) {
+      const st = await api('feeDocState', { platform: 'Shopee', shop }); let ok = 0, bad = 0, why = '';
+      for (const d of st.need) {
+        say('📄 [' + shop + '] เก็บ PDF ' + d.date + ' (' + (d.kind === 'TIV' ? 'ใบกำกับ Shopee' : 'ใบเสร็จ SPX') + ') ' + (ok + bad + 1) + '/' + st.need.length + '…');
+        try {
+          const j = await get('/api/v1/seller/tax-documents/download?documentType[]=' + d.kind + '&since=' + d.date + '&until=' + d.date);
+          const url = findUrl(j && j.data !== undefined ? j.data : j);
+          if (!url) throw new Error('ไม่ได้ลิงก์ไฟล์ (' + Object.keys((j && j.data) || j || {}).join(',').slice(0, 60) + ')');
+          const b = await fetchBlob(url), zip = /zip/i.test(b.type) || /\.zip(\?|$)/i.test(url);
+          await api('feeDocUpload', { platform: 'Shopee', shop, date: d.date, kind: d.kind, key: d.key, ext: zip ? 'zip' : 'pdf', mime: b.type, data: await blobToBase64(b) });
+          ok++;
+        } catch (e) { bad++; why = why || e.message; if (/หมดเวลาเข้าระบบ/.test(e.message)) throw e; }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      return { ok, bad, why, left: Math.max(0, st.total - st.need.length) };
     }
     async function saveFile(json) {   // ลิงก์ไฟล์จากปุ่ม "ดาวน์โหลดทั้งหมด" ที่กดเอง
       const d = json && json.data, url = typeof d === 'string' ? d : d && (d.url || d.link || d.downloadUrl || d.download_url);
@@ -2613,4 +2634,4 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
   })();
 })();
-// ===== END shopee-autoexport.user.js · v3.39 =====
+// ===== END shopee-autoexport.user.js · v3.42 =====
