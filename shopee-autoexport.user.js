@@ -1,13 +1,12 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.45
+// @version      3.46
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
 // @match        https://sellercenter.lazada.co.th/*
 // @match        https://etax.shopee.co.th/*
-// @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -2233,6 +2232,39 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
         onerror: r => { clearTimeout(t); rej(new Error('ดาวน์โหลดไฟล์ไม่ได้' + (r && r.error ? ' (' + r.error + ')' : '') + ' – ถ้า Tampermonkey ถามขออนุญาต ให้กด "อนุญาตเสมอ"')); },
         ontimeout: () => { clearTimeout(t); rej(new Error('ดาวน์โหลดไฟล์ช้าเกินไป')); } });
     });
+    // แตก zip เอง ด้วยตัวคลายบีบอัดในตัวเบราว์เซอร์ (JSZip ค้างเมื่อรันใน Tampermonkey)
+    async function unzipPdfs(buf, prog) {
+      const v = new DataView(buf), u8 = new Uint8Array(buf);
+      let e = -1;
+      for (let k = buf.byteLength - 22; k >= Math.max(0, buf.byteLength - 65557); k--) if (v.getUint32(k, true) === 0x06054b50) { e = k; break; }
+      if (e < 0) throw new Error('ไฟล์ zip เสีย (ไม่พบสารบัญ)');
+      const cnt = v.getUint16(e + 10, true); let c = v.getUint32(e + 16, true);
+      const list = [];
+      for (let k = 0; k < cnt; k++) {
+        if (v.getUint32(c, true) !== 0x02014b50) throw new Error('ไฟล์ zip เสีย (สารบัญผิด)');
+        const flag = v.getUint16(c + 8, true), method = v.getUint16(c + 10, true), csize = v.getUint32(c + 20, true);
+        const nl = v.getUint16(c + 28, true), xl = v.getUint16(c + 30, true), cl = v.getUint16(c + 32, true), lo = v.getUint32(c + 42, true);
+        const name = new TextDecoder().decode(u8.subarray(c + 46, c + 46 + nl));
+        c += 46 + nl + xl + cl;
+        if (!/\.pdf$/i.test(name)) continue;
+        if (flag & 1) throw new Error('zip ติดรหัสผ่าน – แตกเองไม่ได้');
+        const start = lo + 30 + v.getUint16(lo + 26, true) + v.getUint16(lo + 28, true);
+        list.push({ name, method, data: u8.slice(start, start + csize) });
+      }
+      list.sort((a, b) => a.name < b.name ? -1 : 1);
+      const out = [];
+      for (let k = 0; k < list.length; k++) {
+        const f = list[k]; prog && prog((k + 1) + '/' + list.length);
+        let bytes;
+        if (f.method === 0) bytes = f.data;
+        else if (f.method === 8) {
+          if (typeof DecompressionStream === 'undefined') throw new Error('เบราว์เซอร์เก่าเกินไป แตก zip ไม่ได้ – อัปเดต Chrome');
+          bytes = new Uint8Array(await new Response(new Blob([f.data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+        } else throw new Error('zip ใช้วิธีบีบอัดที่ไม่รองรับ (' + f.method + ')');
+        out.push(new Blob([bytes], { type: 'application/pdf' }));
+      }
+      return out;
+    }
     async function runDocs(shop) {
       const st = await api('feeDocState', { platform: 'Shopee', shop }); let ok = 0, bad = 0, why = '';
       for (const d of st.need) {
@@ -2250,9 +2282,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
           let pdfs = [];
           if (sig.slice(0, 2) === 'PK') {   // ไฟล์ zip → แตกในเครื่อง (ตัวแตก zip ของ Google อ่านไฟล์บางแบบไม่ได้)
             step('แตก zip…');
-            if (typeof JSZip === 'undefined') throw new Error('ไม่มีตัวแตก zip (JSZip) – ลบสคริปต์ใน Tampermonkey แล้วติดตั้งใหม่ให้โหลด @require');
-            const z = await JSZip.loadAsync(await b.arrayBuffer());
-            for (const n of Object.keys(z.files).sort()) if (!z.files[n].dir && /\.pdf$/i.test(n)) pdfs.push(new Blob([await z.files[n].async('uint8array')], { type: 'application/pdf' }));
+            pdfs = await unzipPdfs(await b.arrayBuffer(), t => step('แตก zip · ' + t));
           } else if (sig.slice(0, 4) === '%PDF') pdfs = [b];
           else throw new Error('ไฟล์ที่ได้ไม่ใช่ PDF/zip: ' + (await b.slice(0, 80).text()).replace(/\s+/g, ' '));
           if (!pdfs.length) throw new Error('ใน zip ไม่มีไฟล์ PDF');
@@ -2261,7 +2291,7 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
             await api('feeDocUpload', { platform: 'Shopee', shop, date: d.date, kind: d.kind, key: d.key, part: i + 1, parts: pdfs.length, ext: 'pdf', mime: 'application/pdf', data: await blobToBase64(pdfs[i]) });
           }
           ok++;
-        })()]); } catch (e) { bad++; why = why || e.message; console.warn('[Packing Cam e-Tax]', e); if (/หมดเวลาเข้าระบบ|อนุญาต|ค้างเกิน|JSZip/.test(e.message)) { clearTimeout(watchdog); throw e; } }
+        })()]); } catch (e) { bad++; why = why || e.message; console.warn('[Packing Cam e-Tax]', e); if (/หมดเวลาเข้าระบบ|อนุญาต|ค้างเกิน|zip/.test(e.message)) { clearTimeout(watchdog); throw e; } }
         clearTimeout(watchdog);
         await new Promise(r => setTimeout(r, 1500));
       }
@@ -2661,4 +2691,4 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
   })();
 })();
-// ===== END shopee-autoexport.user.js · v3.45 =====
+// ===== END shopee-autoexport.user.js · v3.46 =====
