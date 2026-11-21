@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.42
+// @version      3.44
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
 // @match        https://sellercenter.lazada.co.th/*
 // @match        https://etax.shopee.co.th/*
+// @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -2195,7 +2196,8 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     const rowsOf = json => { const out = []; ((json && json.data && json.data.list) || []).forEach(d => Object.keys(d).forEach(k => { const v = d[k]; if (v && typeof v === 'object' && +v.amount > 0) out.push({ date: String(d.date).slice(0, 10), issuer: k, amount: +v.amount, wht: +v.whtAmount || 0 }); })); return out; };
     // เรียกข้อมูลด้วยส่วนหัวเดียวกับที่หน้าเว็บใช้ (จับจากคำขอของหน้าเว็บเอง)
     const get = path => new Promise((res, rej) => {
-      const x = new W.XMLHttpRequest(); x.open('GET', base + path); x.__pcSelf = 1;
+      const x = new W.XMLHttpRequest(); x.open('GET', base + path); x.__pcSelf = 1; x.timeout = 45000;
+      x.ontimeout = () => rej(new Error('e-Tax ตอบช้าเกิน 45 วินาที'));
       Object.keys(hdr || {}).forEach(k => x.setRequestHeader(k, hdr[k]));
       x.onload = () => { if (x.status === 401 || x.status === 403) return rej(new Error('หมดเวลาเข้าระบบ e-Tax – ล็อกอินใหม่ แล้วสคริปต์จะดึงต่อเอง')); try { res(JSON.parse(x.responseText)); } catch (e) { rej(new Error('อ่านข้อมูลไม่ได้ (HTTP ' + x.status + ')')); } };
       x.onerror = () => rej(new Error('เชื่อมต่อ e-Tax ไม่ได้')); x.send();
@@ -2223,7 +2225,14 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
     // ไฟล์ PDF ของแต่ละใบ (วันละใบ ต่อชนิด) ที่ยังไม่มีใน Drive → ขอลิงก์ดาวน์โหลดจาก e-Tax → เก็บเข้า Drive แล้วผูกกับรายการ
     const findUrl = o => { if (typeof o === 'string') return /^https?:\/\//.test(o) ? o : ''; if (o && typeof o === 'object') for (const k of Object.keys(o)) { const u = findUrl(o[k]); if (u) return u; } return ''; };
-    const fetchBlob = url => new Promise((res, rej) => GM_xmlhttpRequest({ method: 'GET', url, responseType: 'blob', onload: r => r.status < 300 ? res(r.response) : rej(new Error('HTTP ' + r.status)), onerror: () => rej(new Error('ดาวน์โหลดไฟล์ไม่ได้')) }));
+    // ครั้งแรก Tampermonkey จะเปิดหน้าขออนุญาตเชื่อมต่อเว็บเก็บไฟล์ → ถ้าไม่กดอนุญาตภายใน 2 นาที แจ้งให้รู้ (ไม่ค้างเงียบ)
+    const fetchBlob = url => new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error('รออนุญาต/ดาวน์โหลดไฟล์นานเกินไป – ดูหน้าต่าง Tampermonkey ที่ถามขออนุญาตเชื่อมต่อ แล้วกด "อนุญาตเสมอ" (Always allow)')), 120000);
+      GM_xmlhttpRequest({ method: 'GET', url, responseType: 'blob', timeout: 110000,
+        onload: r => { clearTimeout(t); r.status < 300 ? res(r.response) : rej(new Error('ดาวน์โหลดไฟล์ไม่ได้ HTTP ' + r.status)); },
+        onerror: r => { clearTimeout(t); rej(new Error('ดาวน์โหลดไฟล์ไม่ได้' + (r && r.error ? ' (' + r.error + ')' : '') + ' – ถ้า Tampermonkey ถามขออนุญาต ให้กด "อนุญาตเสมอ"')); },
+        ontimeout: () => { clearTimeout(t); rej(new Error('ดาวน์โหลดไฟล์ช้าเกินไป')); } });
+    });
     async function runDocs(shop) {
       const st = await api('feeDocState', { platform: 'Shopee', shop }); let ok = 0, bad = 0, why = '';
       for (const d of st.need) {
@@ -2232,10 +2241,18 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
           const j = await get('/api/v1/seller/tax-documents/download?documentType[]=' + d.kind + '&since=' + d.date + '&until=' + d.date);
           const url = findUrl(j && j.data !== undefined ? j.data : j);
           if (!url) throw new Error('ไม่ได้ลิงก์ไฟล์ (' + Object.keys((j && j.data) || j || {}).join(',').slice(0, 60) + ')');
-          const b = await fetchBlob(url), zip = /zip/i.test(b.type) || /\.zip(\?|$)/i.test(url);
-          await api('feeDocUpload', { platform: 'Shopee', shop, date: d.date, kind: d.kind, key: d.key, ext: zip ? 'zip' : 'pdf', mime: b.type, data: await blobToBase64(b) });
+          const b = await fetchBlob(url), head = new Uint8Array(await b.slice(0, 8).arrayBuffer()), sig = String.fromCharCode.apply(null, head);
+          let pdfs = [];
+          if (sig.slice(0, 2) === 'PK') {   // ไฟล์ zip → แตกในเครื่อง (ตัวแตก zip ของ Google อ่านไฟล์บางแบบไม่ได้)
+            const z = await JSZip.loadAsync(b);
+            for (const n of Object.keys(z.files).sort()) if (!z.files[n].dir && /\.pdf$/i.test(n)) pdfs.push(new Blob([await z.files[n].async('uint8array')], { type: 'application/pdf' }));
+          } else if (sig.slice(0, 4) === '%PDF') pdfs = [b];
+          else throw new Error('ไฟล์ที่ได้ไม่ใช่ PDF/zip: ' + (await b.slice(0, 80).text()).replace(/\s+/g, ' '));
+          if (!pdfs.length) throw new Error('ใน zip ไม่มีไฟล์ PDF');
+          for (let i = 0; i < pdfs.length; i++)
+            await api('feeDocUpload', { platform: 'Shopee', shop, date: d.date, kind: d.kind, key: d.key, part: i + 1, parts: pdfs.length, ext: 'pdf', mime: 'application/pdf', data: await blobToBase64(pdfs[i]) });
           ok++;
-        } catch (e) { bad++; why = why || e.message; if (/หมดเวลาเข้าระบบ/.test(e.message)) throw e; }
+        } catch (e) { bad++; why = why || e.message; if (/หมดเวลาเข้าระบบ|อนุญาต/.test(e.message)) throw e; }
         await new Promise(r => setTimeout(r, 1500));
       }
       return { ok, bad, why, left: Math.max(0, st.total - st.need.length) };
@@ -2634,4 +2651,4 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
   })();
 })();
-// ===== END shopee-autoexport.user.js · v3.42 =====
+// ===== END shopee-autoexport.user.js · v3.44 =====
