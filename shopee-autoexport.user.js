@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.46
+// @version      3.47
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2136,6 +2136,69 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
       if (Date.now() - t0 > 5 * 60e3) throw new Error('Lazada สร้าง PDF ' + month + ' นานเกิน 5 นาที');
     }
   }
+  // 🧾 ใบกำกับภาษี/ใบเสร็จ Lazada (รายสัปดาห์ + สิ้นเดือน) และใบลดหนี้ → ภาษีซื้อทีละใบ + PDF เข้า Drive
+  // อ่านยอดจากตัว PDF เอง (ฐาน / VAT / วันที่ใบกำกับ) · ข้ามใบที่เก็บแล้ว (เทียบเลขที่ใบ)
+  async function lzInflate(b) {
+    const rd = new Blob([b]).stream().pipeThrough(new DecompressionStream('deflate')).getReader(), parts = [];
+    try { for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); } } catch (e) { /* ข้อมูลท้าย stream เกิน – ใช้ส่วนที่ได้ */ }
+    const u = new Uint8Array(await new Blob(parts).arrayBuffer()); let t = ''; for (let i = 0; i < u.length; i++) t += String.fromCharCode(u[i]); return t;
+  }
+  async function lzPdfStrings(buf) {
+    const u8 = new Uint8Array(buf); let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    const out = [], re = /stream\r?\n/g, un = x => x.replace(/\\([()\\])/g, '$1'); let m;
+    while ((m = re.exec(s))) {
+      const st = m.index + m[0].length, en = s.indexOf('endstream', st); if (en < 0) break;
+      const t = await lzInflate(u8.slice(st, en));
+      (t.match(/\((?:[^()\\]|\\.)*\)\s*Tj|\[(?:[^\]\\]|\\.)*\]\s*TJ/g) || []).forEach(x => {
+        const v = x.slice(-2) === 'TJ' ? (x.match(/\((?:[^()\\]|\\.)*\)/g) || []).map(y => un(y.slice(1, -1))).join('') : un(x.replace(/\)\s*Tj$/, '').slice(1));
+        if (v.trim()) out.push(v.trim());
+      });
+    }
+    return out;
+  }
+  function lzParseInv(a) {
+    const after = k => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : ''; }, num = x => +String(x || '').replace(/,/g, '');
+    const pick = re => { for (const x of a) { const m = re.exec(x); if (m) return m[1].trim(); } return ''; };
+    const cn = a.some(x => /^CREDIT NOTE$/i.test(x));
+    const r = { type: cn ? 'CN' : 'TI', no: pick(/^(?:Invoice No\.|Credit Note):\s*(\S+)/), date: pick(/^(?:Invoice Date|Date):\s*(\d{4}-\d{2}-\d{2})/),
+      period: pick(/^Period:\s*(.+)$/), base: num(after('Total')), vat: num(after('7% (VAT)')), total: num(after('Total (Including Tax)')),
+      ref: cn ? after('Refer to Tax Invoice Number#') : '' };
+    if (!r.no || !r.date || !(r.base > 0) || Math.abs(r.base + r.vat - r.total) > 0.05) throw new Error('อ่านยอดจาก PDF ไม่ได้ (' + [r.no, r.date, r.base, r.vat, r.total].join(' / ') + ')');
+    return r;
+  }
+  async function lzInvoices(st) {
+    const state = await api('lzInvState', { shop: LZ_SHOP }, true), done = new Set(state.done || []), from = state.from || '2026-11-01';
+    const minList = new Date(from + 'T00:00:00'); minList.setDate(minList.getDate() - 10);   // วันที่ในรายการ = วันออก (หลังวันที่ใบกำกับไม่กี่วัน)
+    const all = [];
+    for (let pg = 1; pg <= 20; pg++) {
+      st('🧾 Lazada: อ่านรายการใบกำกับ หน้า ' + pg + '…');
+      const r = await lzReq('mtop.lazada.finance.invoice.queryinvoice', { pageSize: 50, pageNum: pg, startTime: '', endTime: '' });
+      const list = (r && r.data && r.data.data && r.data.data.invoiceList) || [];
+      list.forEach(x => all.push(x));
+      if (list.length < 50 || list.some(x => new Date(x.invoiceDate) < minList)) break;
+      await sleep(800);
+    }
+    const todo = all.filter(x => x.invoiceNo && !done.has(x.invoiceNo) && !(new Date(x.invoiceDate) < minList)).reverse();
+    let n = 0, skip = 0; const fails = [];
+    for (let i = 0; i < todo.length; i++) {
+      const x = todo[i];
+      try {
+        st('🧾 Lazada ใบกำกับ ' + (i + 1) + '/' + todo.length + ' · ' + x.invoiceNo + ' · ขอไฟล์…');
+        const d = await lzReq('mtop.lazada.finance.invoice.invoiceDownload', { invoiceNo: x.invoiceNo });
+        const url = d && d.data && d.data.data;
+        if (typeof url !== 'string' || !/^https?:/.test(url)) throw new Error('ไม่ได้ลิงก์ไฟล์');
+        let blob; try { const res = await fetch(url); if (!res.ok) throw 0; blob = await res.blob(); } catch (e) { blob = await gmBlob(url); }
+        st('🧾 Lazada ใบกำกับ ' + (i + 1) + '/' + todo.length + ' · อ่านยอด…');
+        const inv = lzParseInv(await lzPdfStrings(await blob.arrayBuffer()));
+        if (inv.date < from) { skip++; continue; }
+        st('🧾 Lazada ใบกำกับ ' + (i + 1) + '/' + todo.length + ' · ' + inv.date + ' ฿' + inv.total.toLocaleString() + ' · ส่งเข้า Drive…');
+        await api('lzInvSave', Object.assign({ shop: LZ_SHOP, data: await blobToBase64(blob) }, inv), true);
+        n++;
+      } catch (e) { fails.push(x.invoiceNo + ': ' + e.message); console.warn('[Packing Cam Lazada ใบกำกับ]', x.invoiceNo, e); }
+      await sleep(1200);
+    }
+    return { n, skip, fails, total: todo.length };
+  }
   async function runLazada(force) {
     if (lzRunning) return; lzRunning = true;
     const st = msg => { label.textContent = msg; };
@@ -2143,6 +2206,13 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     try {
       if (!settings(false)) throw new Error('ยังไม่ได้ตั้งค่า');
       await withLock('lazada', st, async () => {
+      for (let i = 0; i < 20 && !(unsafeWindow.lib && unsafeWindow.lib.mtop); i++) await sleep(1000);
+      try {   // ใบกำกับภาษีค่าธรรมเนียม → ภาษีซื้อ (ตรวจทุกครั้งที่เปิดหน้า · เร็วเมื่อไม่มีใบใหม่)
+        const iv = await lzInvoices(st);
+        st((iv.fails.length ? '⚠️' : '✅') + ' Lazada ใบกำกับใหม่ ' + iv.n + ' ใบ' + (iv.total ? '' : ' (มีครบแล้ว)') + (iv.fails.length ? ' · ไม่สำเร็จ ' + iv.fails.length + ' – ' + iv.fails[0] : ''));
+        if (iv.fails.length) return;
+        await sleep(2500);
+      } catch (e) { st('❌ ใบกำกับ Lazada: ' + e.message); console.warn('[Packing Cam Lazada ใบกำกับ]', e); return; }
       const lastOk = +sget('lzPdfOk', 0);
       if (!force && Date.now() - lastOk < INCOME_SKIP_HOURS * 3600e3) {
         st('🟢 Lazada PDF ตรวจไปแล้วเมื่อ ' + new Date(lastOk).toTimeString().slice(0, 5) + ' • กดปุ่มเพื่อตรวจอีกครั้ง'); return;
@@ -2691,4 +2761,4 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
   })();
 })();
-// ===== END shopee-autoexport.user.js · v3.46 =====
+// ===== END shopee-autoexport.user.js · v3.47 =====
