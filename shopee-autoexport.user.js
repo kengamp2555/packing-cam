@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.44
+// @version      3.45
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2236,23 +2236,33 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     async function runDocs(shop) {
       const st = await api('feeDocState', { platform: 'Shopee', shop }); let ok = 0, bad = 0, why = '';
       for (const d of st.need) {
-        say('📄 [' + shop + '] เก็บ PDF ' + d.date + ' (' + (d.kind === 'TIV' ? 'ใบกำกับ Shopee' : 'ใบเสร็จ SPX') + ') ' + (ok + bad + 1) + '/' + st.need.length + '…');
-        try {
+        const pre = '📄 [' + shop + '] PDF ' + d.date + ' (' + (d.kind === 'TIV' ? 'ใบกำกับ Shopee' : 'ใบเสร็จ SPX') + ') ' + (ok + bad + 1) + '/' + st.need.length + ' · ';
+        let last = 'เริ่ม'; const step = t => { last = t; say(pre + t); console.log('[Packing Cam e-Tax]', d.date, d.kind, t); };
+        let watchdog;
+        try { await Promise.race([new Promise((_, rej) => { watchdog = setTimeout(() => rej(new Error('ค้างเกิน 3 นาทีที่ขั้น: ' + last)), 180000); }), (async () => {
+          step('ขอลิงก์ไฟล์จาก e-Tax…');
           const j = await get('/api/v1/seller/tax-documents/download?documentType[]=' + d.kind + '&since=' + d.date + '&until=' + d.date);
           const url = findUrl(j && j.data !== undefined ? j.data : j);
           if (!url) throw new Error('ไม่ได้ลิงก์ไฟล์ (' + Object.keys((j && j.data) || j || {}).join(',').slice(0, 60) + ')');
-          const b = await fetchBlob(url), head = new Uint8Array(await b.slice(0, 8).arrayBuffer()), sig = String.fromCharCode.apply(null, head);
+          step('ดาวน์โหลดไฟล์…');
+          const b = await fetchBlob(url); step('ได้ไฟล์ ' + Math.round(b.size / 1024) + ' KB · ตรวจชนิดไฟล์…');
+          const head = new Uint8Array(await b.slice(0, 8).arrayBuffer()), sig = String.fromCharCode.apply(null, head);
           let pdfs = [];
           if (sig.slice(0, 2) === 'PK') {   // ไฟล์ zip → แตกในเครื่อง (ตัวแตก zip ของ Google อ่านไฟล์บางแบบไม่ได้)
-            const z = await JSZip.loadAsync(b);
+            step('แตก zip…');
+            if (typeof JSZip === 'undefined') throw new Error('ไม่มีตัวแตก zip (JSZip) – ลบสคริปต์ใน Tampermonkey แล้วติดตั้งใหม่ให้โหลด @require');
+            const z = await JSZip.loadAsync(await b.arrayBuffer());
             for (const n of Object.keys(z.files).sort()) if (!z.files[n].dir && /\.pdf$/i.test(n)) pdfs.push(new Blob([await z.files[n].async('uint8array')], { type: 'application/pdf' }));
           } else if (sig.slice(0, 4) === '%PDF') pdfs = [b];
           else throw new Error('ไฟล์ที่ได้ไม่ใช่ PDF/zip: ' + (await b.slice(0, 80).text()).replace(/\s+/g, ' '));
           if (!pdfs.length) throw new Error('ใน zip ไม่มีไฟล์ PDF');
-          for (let i = 0; i < pdfs.length; i++)
+          for (let i = 0; i < pdfs.length; i++) {
+            step('ส่งเข้า Drive ' + (i + 1) + '/' + pdfs.length + ' (' + Math.round(pdfs[i].size / 1024) + ' KB)…');
             await api('feeDocUpload', { platform: 'Shopee', shop, date: d.date, kind: d.kind, key: d.key, part: i + 1, parts: pdfs.length, ext: 'pdf', mime: 'application/pdf', data: await blobToBase64(pdfs[i]) });
+          }
           ok++;
-        } catch (e) { bad++; why = why || e.message; if (/หมดเวลาเข้าระบบ|อนุญาต/.test(e.message)) throw e; }
+        })()]); } catch (e) { bad++; why = why || e.message; console.warn('[Packing Cam e-Tax]', e); if (/หมดเวลาเข้าระบบ|อนุญาต|ค้างเกิน|JSZip/.test(e.message)) { clearTimeout(watchdog); throw e; } }
+        clearTimeout(watchdog);
         await new Promise(r => setTimeout(r, 1500));
       }
       return { ok, bad, why, left: Math.max(0, st.total - st.need.length) };
@@ -2651,4 +2661,4 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
   })();
 })();
-// ===== END shopee-autoexport.user.js · v3.44 =====
+// ===== END shopee-autoexport.user.js · v3.45 =====
