@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.38
+// @version      3.39
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
 // @match        https://sellercenter.lazada.co.th/*
+// @match        https://etax.shopee.co.th/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -16,6 +17,7 @@
 // @connect      script.googleusercontent.com
 // @connect      lazada.co.th
 // @connect      fbprivacy.lazada.co.th
+// @connect      *
 // @run-at       document-idle
 // @updateURL    https://kengamp2555.github.io/packing-cam/shopee-autoexport.user.js
 // @downloadURL  https://kengamp2555.github.io/packing-cam/shopee-autoexport.user.js
@@ -2169,6 +2171,87 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     } finally { lzRunning = false; btn.disabled = false; }
   }
 
+  if (location.hostname === 'etax.shopee.co.th') { etaxMain(); return; }
+
+  /* ---------------- 🧾 Shopee e-Tax: ใบกำกับภาษีค่าธรรมเนียม → ภาษีซื้อ (แอปรายงานภาษี) ----------------
+   * เปิดหน้า etax.shopee.co.th ทิ้งไว้ (ล็อกอินแล้ว) → สคริปต์ดึงเองทุก 3 ชม.: ถาม Packing Cam ว่าดึงถึงวันไหนแล้ว
+   * → ขอยอดรายวัน "วันถัดไป – 3 วันก่อน" (ช่วงละไม่เกิน 31 วัน) → ส่งเข้าชีต TAX_InputVAT ทีละใบ · ไม่ดึงวันซ้ำ · เริ่ม พ.ย. 2569
+   * ใช้การเชื่อมต่อของหน้าเว็บเอง (ส่วนหัวที่หน้าเว็บใช้เรียกข้อมูล เก็บไว้ในหน่วยความจำของแท็บเท่านั้น ไม่ส่งออกไปไหน)
+   * กด "ดาวน์โหลดทั้งหมด" เอง → เก็บไฟล์ใบกำกับเข้า Drive "เอกสารภาษี/Shopee/<ร้าน>" ด้วย */
+  function etaxMain() {
+    const W = unsafeWindow, X = W.XMLHttpRequest && W.XMLHttpRequest.prototype, EVERY = 3 * 3600e3;
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:99999;max-width:420px;background:rgba(0,0,0,.85);color:#fff;border-radius:12px;padding:10px 14px;font:13px/1.5 system-ui,-apple-system,sans-serif';
+    box.textContent = '🧾 Packing Cam: รอหน้าเว็บโหลด…';
+    const add = () => document.body && !box.isConnected && document.body.appendChild(box); add(); setInterval(add, 3000);
+    const say = (t, bad) => { box.textContent = t; box.style.background = bad ? 'rgba(180,35,24,.92)' : 'rgba(0,0,0,.85)'; };
+    const shopName = () => {
+      const c = [...document.querySelectorAll('h1,h2,h3,header *,[class*=name],[class*=user]')].map(e => (e.childElementCount ? '' : e.textContent || '').trim()).filter(t => /^[A-Za-z0-9_.]{3,30}$/.test(t));
+      return c[0] || '';
+    };
+    let hdr = null, base = '', busy = false, lastRun = 0;
+    const ymd = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const addDay = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
+    const rowsOf = json => { const out = []; ((json && json.data && json.data.list) || []).forEach(d => Object.keys(d).forEach(k => { const v = d[k]; if (v && typeof v === 'object' && +v.amount > 0) out.push({ date: String(d.date).slice(0, 10), issuer: k, amount: +v.amount, wht: +v.whtAmount || 0 }); })); return out; };
+    // เรียกข้อมูลด้วยส่วนหัวเดียวกับที่หน้าเว็บใช้ (จับจากคำขอของหน้าเว็บเอง)
+    const get = path => new Promise((res, rej) => {
+      const x = new W.XMLHttpRequest(); x.open('GET', base + path); x.__pcSelf = 1;
+      Object.keys(hdr || {}).forEach(k => x.setRequestHeader(k, hdr[k]));
+      x.onload = () => { if (x.status === 401 || x.status === 403) return rej(new Error('หมดเวลาเข้าระบบ e-Tax – ล็อกอินใหม่ แล้วสคริปต์จะดึงต่อเอง')); try { res(JSON.parse(x.responseText)); } catch (e) { rej(new Error('อ่านข้อมูลไม่ได้ (HTTP ' + x.status + ')')); } };
+      x.onerror = () => rej(new Error('เชื่อมต่อ e-Tax ไม่ได้')); x.send();
+    });
+    async function runAuto(force) {
+      if (busy || !hdr) return; if (!force && Date.now() - lastRun < EVERY) return;
+      const shop = shopName(); if (!shop) return say('🧾 รออ่านชื่อร้านในหน้า…');
+      busy = true; lastRun = Date.now();
+      try {
+        const st = await api('feeInvoiceState', { platform: 'Shopee', shop });
+        let from = st.next, to = addDay(ymd(new Date()), -3), n = 0, days = 0;   // ถึง 3 วันก่อน (เผื่อ Shopee ออกใบ/ยอดช้า · วันที่ดึงแล้วจะไม่ดึงซ้ำ)
+        if (from > to) { say('✅ [' + shop + '] ภาษีซื้อ Shopee ครบถึง ' + st.last + ' แล้ว · เช็กใหม่อีก 3 ชม. · ' + new Date().toTimeString().slice(0, 5)); busy = false; return; }
+        while (from <= to) {
+          const end = [addDay(from, 30), to].sort()[0];
+          say('🧾 [' + shop + '] ดึงใบกำกับ ' + from + ' → ' + end + '…');
+          const rows = rowsOf(await get('/api/v1/seller/invoices/me?since=' + from + '&until=' + end));
+          const r = await api('feeInvoices', { platform: 'Shopee', shop, rows, until: end });
+          n += r.added; days += Math.round((new Date(end) - new Date(from)) / 864e5) + 1; from = addDay(end, 1);
+        }
+        say('✅ [' + shop + '] ภาษีซื้อ Shopee: เพิ่ม ' + n + ' ใบ (' + days + ' วัน) ครบถึง ' + to + ' · เช็กใหม่อีก 3 ชม. · ' + new Date().toTimeString().slice(0, 5));
+      } catch (e) { say('❌ ' + e.message, 1); lastRun = Date.now() - EVERY + 10 * 60e3; }   // ไม่สำเร็จ → ลองใหม่ใน 10 นาที
+      busy = false;
+    }
+    async function saveFile(json) {   // ลิงก์ไฟล์จากปุ่ม "ดาวน์โหลดทั้งหมด" ที่กดเอง
+      const d = json && json.data, url = typeof d === 'string' ? d : d && (d.url || d.link || d.downloadUrl || d.download_url);
+      if (!/^https?:\/\//.test(String(url || ''))) return;
+      const shop = shopName(), since = (document.querySelector('input[placeholder*="เริ่ม"]') || {}).value || '';
+      const m = /(\d{2})-(\d{2})-(\d{4})/.exec(since), month = m ? m[3] + '-' + m[2] : '';
+      if (!shop || !month) return;
+      say('🧾 กำลังเก็บไฟล์ใบกำกับ ' + month + ' เข้า Drive…');
+      GM_xmlhttpRequest({ method: 'GET', url, responseType: 'blob', onload: async r => {
+        try {
+          const b = r.response, ext = /zip/i.test(b.type) || /\.zip/i.test(url) ? 'zip' : 'pdf';
+          await api('taxDocUpload', { platform: 'Shopee', shop, month, kind: 'ใบกำกับค่าธรรมเนียม', ext, data: await blobToBase64(b) });
+          say('✅ เก็บไฟล์ใบกำกับ ' + month + ' เข้า Drive แล้ว');
+        } catch (e) { say('❌ เก็บไฟล์ไม่ได้: ' + e.message, 1); }
+      }, onerror: () => say('❌ ดาวน์โหลดไฟล์ไม่ได้', 1) });
+    }
+    if (X && !X.__pcEtax) {
+      X.__pcEtax = 1; const open = X.open, send = X.send, setH = X.setRequestHeader;
+      X.open = function (m, u) { this.__pcU = String(u || ''); this.__pcH = {}; return open.apply(this, arguments); };
+      X.setRequestHeader = function (k, v) { if (this.__pcH) this.__pcH[k] = v; return setH.apply(this, arguments); };
+      X.send = function () {
+        const u = this.__pcU;
+        if (!this.__pcSelf && /\/api\/v1\/seller\//.test(u)) {
+          const fresh = !hdr; hdr = Object.assign({}, this.__pcH); const m = /^(https?:\/\/[^/]+)/.exec(u); base = m ? m[1] : '';
+          if (fresh) { say('🧾 เชื่อมต่อแล้ว · กำลังตรวจว่าดึงถึงวันไหน…'); setTimeout(() => runAuto(true), 1500); }
+        }
+        if (/\/seller\/tax-documents\/download/.test(u)) this.addEventListener('load', () => { try { saveFile(JSON.parse(this.responseText)); } catch (e) { } });
+        return send.apply(this, arguments);
+      };
+    }
+    setInterval(() => runAuto(false), 60e3);   // เปิดค้างไว้ → เช็กทุก 3 ชม.
+    setTimeout(() => { if (!hdr) say('🧾 Packing Cam: ล็อกอิน e-Tax แล้วเปิดเมนูใดก็ได้ 1 ครั้ง (เช่น ดาวน์โหลดใบเสร็จ…เต็มรูป) สคริปต์จะเริ่มดึงเอง'); }, 8000);
+  }
+
   /* ---------------- UI ---------------- */
   const box = document.createElement('div');
   box.id = 'pcAutoBox';
@@ -2530,3 +2613,4 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     }
   })();
 })();
+// ===== END shopee-autoexport.user.js · v3.39 =====

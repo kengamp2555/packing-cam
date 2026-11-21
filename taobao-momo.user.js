@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.6
+// @version      2.7
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -46,6 +46,7 @@
     post({ action: 'ping' }).then(() => alert('✅ เชื่อมต่อได้')).catch(e => alert('❌ ' + e.message));
   });
   GM_registerMenuCommand('🔄 ดึงข้อมูลตอนนี้', () => run());
+  if (/taobao/.test(location.hostname)) GM_registerMenuCommand('📚 Taobao: ดึงเต็ม 30 วัน (ไม่หยุดกลางทาง)', () => runTaobao(true));
   if (/momocargo/.test(location.hostname)) GM_registerMenuCommand('💱 อ่านเรทหยวนจากหน้านี้', () => { const v = readRate(); v ? sendRate(v, 'momo-manual', true) : say('ไม่พบข้อความ "เรทเงินหยวนวันนี้ ฿x/¥1" ในหน้านี้', 1); });
 
   /* ---------- ส่งเข้า Apps Script ---------- */
@@ -299,22 +300,28 @@
   }
   const tbReady = () => !!document.querySelector('.ant-pagination') || !!P.tbLast;
   async function tbWaitNew(seq, ms) { for (let t = 0; t < ms; t += 300) { if (P.tbSeq > seq) return true; await sleep(300); } return false; }
-  async function runTaobao() {
+  const TB_FULL_EVERY = 7 * 864e5;   // ดึงเต็ม 30 วันอัตโนมัติทุก 7 วัน · รอบอื่นดึงแบบเร็ว (หยุดเมื่อเจอแต่ออเดอร์ที่จบแล้ว)
+  async function runTaobao(forceFull) {
     if (P.busy) return;
+    const full = !!forceFull || !!GM_getValue('tb_resume_full', 0) || Date.now() - +GM_getValue('tb_fullAt', 0) > TB_FULL_EVERY;
     const cut = new Date(Date.now() - TB_DAYS * 864e5).toISOString().slice(0, 10);
     // หน้าเปิดค้างไว้นาน → โหลดหน้าใหม่ก่อน (ได้ข้อมูลล่าสุด) แล้วดึงต่อหลังโหลดเสร็จ
     const act = document.querySelector('.ant-pagination-item-active'), onFirst = !act || act.textContent.trim() === '1';
     if (!P.tbLast || !onFirst || Date.now() - P.tbLoadedAt > 3 * 60e3) {
-      GM_setValue('tb_resume', Date.now()); say('Taobao: โหลดหน้าใหม่ก่อนดึง…'); location.reload(); return;
+      GM_setValue('tb_resume', Date.now()); GM_setValue('tb_resume_full', full ? 1 : 0); say('Taobao: โหลดหน้าใหม่ก่อนดึง…'); location.reload(); return;
     }
-    P.busy = true; let total = 0;
+    GM_setValue('tb_resume_full', 0);
+    P.busy = true; let total = 0, pages = 0, early = false;
     try {
       for (let page = 1; page <= TB_MAX_PAGES; page++) {
-        const x = P.tbLast;
-        say('Taobao: บันทึกหน้า ' + page + ' (ย้อนหลัง ' + TB_DAYS + ' วัน)…');
+        const x = P.tbLast; pages = page;
+        say('Taobao: ' + (full ? 'ดึงเต็ม' : 'ดึงเร็ว') + ' หน้า ' + page + '…');
         const keep = x.orders.filter(o => !o.created || String(o.created).slice(0, 10) >= cut);
-        if (keep.length) total += (await post({ action: 'tb', orders: keep })).saved;
+        let r = null;
+        if (keep.length) { r = await post({ action: 'tb', orders: keep }); total += r.saved; }
         if (keep.length < x.orders.length) break;
+        // ดึงเร็ว: ทั้งหน้าเป็นออเดอร์ที่จบแล้วและไม่มีอะไรเปลี่ยน + ไม่มีออเดอร์ค้างที่เก่ากว่านี้ → หยุด
+        if (!full && r && keep.length && r.settled >= keep.length && !r.openBefore) { early = true; break; }
         const next = document.querySelector('.ant-pagination-next');
         if (!next || next.classList.contains('ant-pagination-disabled') || next.getAttribute('aria-disabled') === 'true') break;
         await sleep(2000 + Math.random() * 1500);
@@ -322,8 +329,8 @@
         (next.querySelector('button,a') || next).click();
         if (!(await tbWaitNew(seq, 15000))) throw new Error('กดหน้าถัดไปแล้วไม่มีข้อมูลตอบกลับ (มีหน้ายืนยันตัวตนขึ้นมาหรือเปล่า?)');
       }
-      await post({ action: 'tb', orders: [], full: 1 });
-      say('Taobao: บันทึกแล้ว ' + total + ' ออเดอร์ · ' + new Date().toLocaleTimeString('th-TH').slice(0, 5));
+      if (full) { await post({ action: 'tb', orders: [], full: 1 }); GM_setValue('tb_fullAt', Date.now()); }
+      say('Taobao: บันทึกแล้ว ' + total + ' ออเดอร์ · ' + pages + ' หน้า' + (early ? ' (หยุดเร็ว: ที่เหลือจบแล้ว)' : full ? ' (ดึงเต็ม)' : '') + ' · ' + new Date().toLocaleTimeString('th-TH').slice(0, 5));
     } catch (e) { say('Taobao: ' + e.message, 1); }
     finally { P.busy = false; }
   }
