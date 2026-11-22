@@ -1,7 +1,10 @@
 /* 💬 Chat Hub Connector · background (Manifest V3)
- * ทุก 1 นาที: ใช้แท็บ Lazada Seller Center (ปักหมุดไว้ · เปิดให้เองถ้าไม่มี) อ่านแชทที่มีข้อความใหม่ → ส่งเข้า Chat Hub
- * อ่านอย่างเดียว: ไม่ส่งข้อความ ไม่กดอ่าน ไม่เปลี่ยนอะไรใน Lazada
+ * ทุก 1 นาที: ใช้แท็บแชท Lazada / Shopee (ปักหมุดไว้ · เปิดให้เองถ้าไม่มี) อ่านแชทที่มีข้อความใหม่ → ส่ง "ข้อมูลดิบ" เข้า Chat Hub
+ * การแปลงข้อความ (การ์ดสินค้า รูป ป้าย AI ฯลฯ) ทำที่ Chat Hub (Parse.gs) → แก้วิธีแสดงผลได้โดยไม่ต้องอัปเดตส่วนเสริม
+ * อ่านอย่างเดียว: ไม่ส่งข้อความ ไม่กดอ่าน ไม่เปลี่ยนอะไรใน Lazada / Shopee
  */
+const VER = chrome.runtime.getManifest().version;
+const VER_URL = 'https://kengamp2555.github.io/packing-cam/chathub-ext/version.json';
 const LZ_CHAT = 'https://sellercenter.lazada.co.th/apps/im/chat';
 const LZ_CH = 'lazada-kengamp';
 const FIRST_DAYS = 3;            // ครั้งแรก: ดึงย้อนหลังกี่วัน
@@ -13,12 +16,29 @@ const store = {
 function ensureAlarm() { chrome.alarms.get('poll', a => { if (!a) chrome.alarms.create('poll', { periodInMinutes: 1, delayInMinutes: 0.1 }); }); }
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); chrome.runtime.openOptionsPage(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') pollAll('auto'); });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } });
 chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   if (msg && msg.cmd === 'pollNow') { pollAll('manual').then(r => reply(r)); return true; }
+  if (msg && msg.cmd === 'checkUpdate') { checkUpdate(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'reset') { chrome.storage.local.remove(['lzState', 'spState']).then(() => reply({ ok: true })); return true; }
 });
 chrome.notifications.onClicked.addListener(async () => { const u = await store.get('hubUrl'); if (u) chrome.tabs.create({ url: u.split('?')[0] }); });
+
+/* ---------- เช็กเวอร์ชันใหม่ (วันละไม่กี่ครั้ง) ---------- */
+const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+async function checkUpdate(force) {
+  const last = await store.get('updCheckedAt');
+  if (!force && last && Date.now() - last < 6 * 3600e3) return store.get('update');
+  await store.set('updCheckedAt', Date.now());
+  try {
+    const j = await (await fetch(VER_URL + '?t=' + Date.now(), { cache: 'no-store' })).json();
+    const upd = j && j.version && newer(j.version, VER) ? { version: j.version, zip: j.zip, notes: j.notes || '' } : null;
+    const prev = await store.get('update');
+    await store.set('update', upd);
+    if (upd && (!prev || prev.version !== upd.version)) chrome.notifications.create('upd', { type: 'basic', iconUrl: 'icon128.png', title: '🔔 Chat Hub Connector มีเวอร์ชันใหม่ ' + upd.version, message: (upd.notes || '') + ' · กดไอคอนส่วนเสริม → ดาวน์โหลด', priority: 1 });
+    return upd;
+  } catch (e) { return store.get('update'); }
+}
 
 let busy = false;
 async function pollAll(why) {
@@ -74,11 +94,10 @@ async function pollLazada(hubUrl) {
     if (r.error === 'login') await notifyOnce('lzlogin', 'Lazada Seller Center ออกจากระบบแล้ว', 'เปิดแท็บ Lazada ที่ปักหมุดไว้ แล้วล็อกอินใหม่');
     return { error: r.error === 'login' ? 'ต้องล็อกอิน Lazada ใหม่' : r.error };
   }
-  await sendHub(hubUrl, LZ_CH, r.items);
+  const fresh = await sendHub(hubUrl, LZ_CH, 'lazada', {}, r.items);
   await store.set('lzState', { since: state.since, seen: r.seen });
-  const newIn = r.items.filter(m => m.dir === 'in');
-  if (newIn.length && state.seen && Object.keys(state.seen).length) notifyNew('Lazada', newIn);   // ไม่เด้งตอนดึงครั้งแรก
-  return { sessions: r.checked, items: r.items.length, newIn: newIn.length };
+  if (fresh.length && state.seen && Object.keys(state.seen).length) notifyNew('Lazada', fresh);   // ไม่เด้งตอนดึงครั้งแรก
+  return { sessions: r.checked, items: r.items.length, newIn: fresh.length };
 }
 /* ---------- Shopee (Seller Centre แชท · ร้านที่ล็อกอินอยู่ในเบราว์เซอร์นี้) ---------- */
 const SP_CHAT = 'https://seller.shopee.co.th/new-webchat/conversations';
@@ -103,20 +122,23 @@ async function pollShopee(hubUrl) {
   }
   const ch = SP_CH[String(r.user || '').toLowerCase()];
   if (!ch) return { error: 'ร้าน Shopee "' + r.user + '" ยังไม่มีใน Chat Hub' };
-  await sendHub(hubUrl, ch, r.items);
+  const fresh = await sendHub(hubUrl, ch, 'shopee', { shopId: r.shopId }, r.items);
   const first = !all[r.user];
   all[r.user] = { since: r.since, seen: r.seen };
   await store.set('spState', all);
-  const newIn = r.items.filter(m => m.dir === 'in');
-  if (newIn.length && !first) notifyNew('Shopee ' + r.user, newIn);
-  return { shop: r.user, sessions: r.checked, items: r.items.length, newIn: newIn.length };
+  if (fresh.length && !first) notifyNew('Shopee ' + r.user, fresh);
+  return { shop: r.user, sessions: r.checked, items: r.items.length, newIn: fresh.length };
 }
-async function sendHub(hubUrl, ch, items) {
-  for (let i = 0; i < items.length; i += 100) {
-    const resp = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ch, items: items.slice(i, i + 100) }) });
+/** ส่งข้อมูลดิบเข้า Chat Hub ทีละ 40 ข้อความ · คืนรายการข้อความลูกค้าที่เพิ่งเข้าใหม่ (Chat Hub เป็นคนบอก) */
+async function sendHub(hubUrl, ch, src, ctx, items) {
+  const fresh = [];
+  for (let i = 0; i < items.length; i += 40) {
+    const resp = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ch, src, ctx, ver: VER, items: items.slice(i, i + 40) }) });
     let j = null; try { j = await resp.json(); } catch (e) { }
     if (!j || !j.ok) throw new Error('Chat Hub ไม่รับข้อมูล' + (j && j.error ? ' (' + j.error + ')' : ' – ตรวจลิงก์ในตั้งค่า'));
+    (j.fresh || []).forEach(x => fresh.push(x));
   }
+  return fresh;
 }
 function notifyNew(label, newIn) {
   const by = {}; newIn.forEach(m => { by[m.name] = m.text; });
@@ -141,16 +163,13 @@ async function spPollInPage(all) {
   try { convs = await get('v1.2/conversations?direction=older&type=all&limit=30&biz_id=0'); }
   catch (e) { return { error: e.message === 'login' ? 'login' : e.message }; }
   const shopId = String(ses.shop && ses.shop.id || ''), seen = Object.assign({}, state.seen || {}), items = [];
-  const txt = m => {
-    const c = m.content || {}, t = m.type;
-    if (/^(text|extended_markdown|faq_liveagent)$/.test(t)) return String(c.text || '');
-    if (t === 'rich_text') return String(c.plain_text || c.text_without_image || c.text || '');
-    if (t === 'image') return '[รูปภาพ]';
-    if (t === 'sticker') return '[สติกเกอร์]';
-    if (/^product/.test(t)) return '[สินค้า] ' + (c.product_name || c.name || c.title || '');
-    if (/order/.test(t)) return '[คำสั่งซื้อ] ' + (c.order_sn || c.order_id || '');
-    if (t === 'notification' || t === 'faq_unsupported') return '';
-    return typeof m.custom_preview_text === 'string' && m.custom_preview_text ? m.custom_preview_text : '[' + t + ']';
+  /* ตัดส่วนที่ไม่ใช้ (คำแปลหลายภาษา ข้อมูลติดตาม) ให้ข้อมูลดิบเล็กลง · ที่เหลือส่งทั้งก้อนให้ Chat Hub แปลงเอง */
+  const DROP = /^(translated_text|buyer_translated_text|translated_with_lang|translated_text_list|noti_text_of_all_languages|follow_up_question|tracking_play_load|msg_tag|msg_attr|crm_activity_id|warning|waring_tip_types|feedback_info|request_id|region|country|model_price_info|selling_point|review_bar|edt|image_overlays_hash|pass_through_data)$/;
+  const slim = (v, d) => {
+    if (d > 8 || v == null) return v;
+    if (Array.isArray(v)) return v.slice(0, 8).map(x => slim(x, d + 1));
+    if (typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { if (!DROP.test(k)) o[k] = slim(v[k], d + 1); }); return o; }
+    return typeof v === 'string' && v.length > 4000 ? v.slice(0, 4000) : v;
   };
   let checked = 0;
   for (const c of convs || []) {
@@ -160,18 +179,16 @@ async function spPollInPage(all) {
     try {
       const M = await get('v1.2/conversations/' + c.id + '/messages?shop_id=' + shopId + '&offset=0&limit=20&direction=older&biz_id=0&on_message_received=true');
       (M || []).forEach(m => {
-        const at = Date.parse(m.created_at) || (Number(m.created_timestamp) * 1000) || 0, text = txt(m);
-        if (!text || at <= prev) return;
-        const out = String(m.from_shop_id || '') === shopId;
-        items.push({ uid: String(c.id), name: c.to_name || '', pic: c.to_avatar || '', at, dir: out ? 'out' : 'in', type: m.type === 'image' ? 'image' : 'text',
-          text: (out && /^faq/.test(m.type) ? '🤖 ' : '') + text, media: m.type === 'image' ? String((m.content || {}).url || (m.content || {}).thumb_url || '') : '', msgId: String(m.id) });
+        const at = Date.parse(m.created_at) || (Number(m.created_timestamp) * 1000) || 0;
+        if (!m.id || at <= prev) return;
+        items.push({ uid: String(c.id), name: c.to_name || '', pic: c.to_avatar || '', at, msgId: String(m.id), raw: slim(m, 0) });
       });
       seen[c.id] = last;
     } catch (e) { if (e.message === 'login') return { error: 'login' }; }
     await new Promise(r => setTimeout(r, 300));
   }
   items.sort((a, b) => a.at - b.at);
-  return { user, since: state.since, seen, items, checked };
+  return { user, shopId, since: state.since, seen, items, checked };
 }
 
 async function notifyOnce(key, title, message) {
@@ -194,18 +211,8 @@ async function lzPollInPage(state) {
   catch (e) { const ret = JSON.stringify((e && e.ret) || e || ''); return { error: /SESSION|LOGIN|TOKEN_EXOIRED|FAIL_SYS_SESSION/i.test(ret) ? 'login' : 'Lazada ตอบผิดพลาด: ' + ret.slice(0, 120) }; }
   const sessions = (sres && sres.data && sres.data.sessionViewDTOList) || [];
   const seen = Object.assign({}, state.seen || {}), items = [];
-  const parse = m => {
-    const b = m.body || {}, t = b.typeData || {}, card = b.layoutData && b.layoutData.card;
-    let td = {}; try { td = JSON.parse(b.templateData || '{}'); } catch (e) { }
-    let text = '';
-    if (card === 1 && td.txt) { text = String(td.txt); if (/^\{/.test(text)) { try { const o = JSON.parse(text); text = o.th || o.en || Object.values(o)[0] || text; } catch (e) { } } }
-    else if (card === 3) text = '[รูปภาพ]';
-    else if (td.title) text = '[สินค้า] ' + td.title + (td.price ? ' · ' + td.price : '');
-    else if (td.txt) { text = String(td.txt); try { const o = JSON.parse(text); text = o.th || o.en || text; } catch (e) { } }
-    else text = t.summary || '[ข้อความ]';
-    const ext = t.ext || {}, bot = ext.fromLisa || /assistant/i.test(ext.fromAccountNickname || '');
-    return { at: Number(t.sendTime) || Date.now(), dir: Number(t.fromType) === 1 ? 'in' : 'out', type: card === 3 ? 'image' : 'text', text: (bot && Number(t.fromType) !== 1 ? '🤖 ' : '') + text, msgId: t.mid || t.bizUnique };
-  };
+  const at = m => Number(((m.body || {}).typeData || {}).sendTime) || 0;
+  const mid = m => { const t = (m.body || {}).typeData || {}; return t.mid || t.bizUnique || ''; };
   let checked = 0;
   for (const sv of sessions) {
     const sd = sv.sessionData || {}, last = Number(sd.lastMessageTime || 0), prev = Number(seen[sv.sessionId] || state.since || 0);
@@ -213,8 +220,8 @@ async function lzPollInPage(state) {
     checked++;
     try {
       const r = await req('mtop.im.use.seller.messagebox.queryMessageListBySessionId', Object.assign({ sessionViewId: sv.sessionId, startTime: String(Date.now()), fetchCount: 20, isDownward: false }, base));
-      ((r.data && r.data.result) || []).map(parse).filter(x => x.msgId && x.at > prev)
-        .forEach(x => items.push(Object.assign(x, { uid: sv.sessionId, name: sd.title || '', pic: sd.headUrl || '' })));
+      ((r.data && r.data.result) || []).filter(m => mid(m) && at(m) > prev)
+        .forEach(m => items.push({ uid: sv.sessionId, name: sd.title || '', pic: sd.headUrl || '', at: at(m), msgId: String(mid(m)), raw: m }));
       seen[sv.sessionId] = last;
     } catch (e) { /* แชทนี้ลองใหม่รอบหน้า */ }
     await new Promise(r => setTimeout(r, 400));

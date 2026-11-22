@@ -1,17 +1,38 @@
 {
   "manifest_version": 3,
   "name": "💬 Chat Hub Connector",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ส่งแชทลูกค้า Lazada และ Shopee เข้า Chat Hub อัตโนมัติ · อ่านอย่างเดียว",
-  "permissions": ["alarms", "storage", "scripting", "tabs", "notifications"],
+  "permissions": [
+    "alarms",
+    "storage",
+    "scripting",
+    "tabs",
+    "notifications"
+  ],
   "host_permissions": [
     "https://sellercenter.lazada.co.th/*",
     "https://seller.shopee.co.th/*",
     "https://script.google.com/*",
-    "https://script.googleusercontent.com/*"
+    "https://script.googleusercontent.com/*",
+    "https://kengamp2555.github.io/*"
   ],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "Chat Hub Connector", "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" } },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Chat Hub Connector",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
   "options_page": "options.html",
-  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
 }

@@ -11,6 +11,14 @@ function show(st, hub) {
 }
 async function load() { const r = await chrome.storage.local.get(['lastRun', 'hubUrl']); show(r.lastRun, r.hubUrl); return r; }
 load();
+$('ver').textContent = 'v' + chrome.runtime.getManifest().version;
+chrome.runtime.sendMessage({ cmd: 'checkUpdate' }).then(u => {
+  if (!u || !u.version) return;
+  $('upd').hidden = false;
+  $('upd').innerHTML = '🔔 <b>มีเวอร์ชันใหม่ ' + esc(u.version) + '</b>' + (u.notes ? '<br>' + esc(u.notes) : '') +
+    '<br>① ดาวน์โหลด → แตก zip ทับโฟลเดอร์เดิม<br>② chrome://extensions → กด 🔄 ที่ส่วนเสริมนี้' +
+    '<a class="dl" target="_blank" href="' + esc(u.zip) + '">⬇ ดาวน์โหลด</a>';
+});
 $('now').onclick = async () => { $('now').disabled = true; $('now').textContent = '⏳ กำลังดึง…'; const st = await chrome.runtime.sendMessage({ cmd: 'pollNow' }); const r = await chrome.storage.local.get('hubUrl'); show(st, r.hubUrl); $('now').disabled = false; $('now').textContent = '↻ ดึงแชทตอนนี้'; };
 $('hub').onclick = async () => { const r = await load(); if (r.hubUrl) chrome.tabs.create({ url: r.hubUrl.split('?')[0] }); };
 $('opt').onclick = () => chrome.runtime.openOptionsPage();
