@@ -7,7 +7,7 @@ function show(st, hub) {
   $('st').innerHTML = 'รอบล่าสุด: ' + new Date(st.at).toLocaleTimeString('th-TH') + ' (' + (st.why === 'manual' ? 'กดเอง' : 'อัตโนมัติทุก 1 นาที') + ')<br>' +
     (st.ok ? '' : '<span class="err">❌ ' + esc(st.error) + '</span><br>') +
     '<b>Lazada:</b> ' + (lz.error ? '<span class="err">❌ ' + esc(lz.error) + '</span>' : st.ok ? '<span class="ok">✅ ตรวจ ' + (lz.sessions || 0) + ' แชท · ส่งเข้า ' + (lz.items || 0) + ' ข้อความ</span>' : '-') +
-    '<br><b>Shopee:</b> ขั้นถัดไป';
+    '<br><b>Shopee:</b> ' + (function(sp) { return !sp ? '-' : sp.error ? '<span class="err">❌ ' + esc(sp.error) + '</span>' : '<span class="ok">✅ ' + esc(sp.shop) + ' · ตรวจ ' + (sp.sessions || 0) + ' แชท · ส่งเข้า ' + (sp.items || 0) + ' ข้อความ</span>'; })(st.shopee);
 }
 async function load() { const r = await chrome.storage.local.get(['lastRun', 'hubUrl']); show(r.lastRun, r.hubUrl); return r; }
 load();

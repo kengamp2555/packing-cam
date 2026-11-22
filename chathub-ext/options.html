@@ -12,10 +12,11 @@
 <body><div class="card">
   <h2 style="margin-top:0">💬 Chat Hub Connector · ตั้งค่า</h2>
   <p class="hint">1) เปิดแอป Chat Hub → ⚙ ตั้งค่า → กล่อง "Lazada / Shopee" → กด <b>คัดลอก</b> ลิงก์ แล้ววางที่นี่<br>
-  2) ล็อกอิน Lazada Seller Center ไว้ใน Chrome นี้ (ส่วนเสริมจะเปิดแท็บแชท Lazada ปักหมุดไว้ให้เอง – ไม่ต้องปิด)</p>
+  2) ล็อกอิน Lazada Seller Center และ Shopee Seller Centre ไว้ใน Chrome นี้ (ส่วนเสริมจะเปิดแท็บแชทปักหมุดไว้ให้เอง – ไม่ต้องปิด)</p>
   <label><b>ลิงก์ Chat Hub (สำหรับส่วนเสริม)</b></label>
   <input type="text" id="url" placeholder="https://script.google.com/macros/s/…/exec?src=ext&k=…">
-  <p><label><input type="checkbox" id="lz" checked> ดึงแชท Lazada (KengAmp)</label></p>
+  <p><label><input type="checkbox" id="lz" checked> ดึงแชท Lazada (KengAmp)</label><br>
+  <label><input type="checkbox" id="sp" checked> ดึงแชท Shopee (ร้านที่ล็อกอิน Seller Centre อยู่ในเบราว์เซอร์นี้)</label></p>
   <p class="hint">อ่านอย่างเดียว: ไม่ส่งข้อความ ไม่กดอ่าน ไม่เปลี่ยนอะไรใน Lazada · ทำงานทุก 1 นาทีเมื่อ Chrome เปิดอยู่</p>
   <button id="save">บันทึก แล้วลองดึงเลย</button>
   <button class="g" id="reset" title="ล้างความจำว่าอ่านแชทถึงไหน – รอบหน้าดึงย้อน 3 วันใหม่ (ข้อความซ้ำจะไม่ถูกบันทึกซ้ำ)">ล้างความจำ</button>
