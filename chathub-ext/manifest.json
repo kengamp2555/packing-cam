@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "💬 Chat Hub Connector",
-  "version": "0.3.0",
-  "description": "ส่งแชทลูกค้า Lazada และ Shopee เข้า Chat Hub อัตโนมัติ · อ่านอย่างเดียว",
+  "version": "0.4.0",
+  "description": "รวมแชทลูกค้า Lazada และ Shopee เข้า Chat Hub และส่งข้อความที่ตอบจาก Chat Hub",
   "permissions": [
     "alarms",
     "storage",

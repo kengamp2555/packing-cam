@@ -1,7 +1,7 @@
 /* 💬 Chat Hub Connector · background (Manifest V3)
  * ทุก 1 นาที: ใช้แท็บแชท Lazada / Shopee (ปักหมุดไว้ · เปิดให้เองถ้าไม่มี) อ่านแชทที่มีข้อความใหม่ → ส่ง "ข้อมูลดิบ" เข้า Chat Hub
  * การแปลงข้อความ (การ์ดสินค้า รูป ป้าย AI ฯลฯ) ทำที่ Chat Hub (Parse.gs) → แก้วิธีแสดงผลได้โดยไม่ต้องอัปเดตส่วนเสริม
- * อ่านอย่างเดียว: ไม่ส่งข้อความ ไม่กดอ่าน ไม่เปลี่ยนอะไรใน Lazada / Shopee
+ * ส่งข้อความเฉพาะที่ผู้ใช้พิมพ์ตอบใน Chat Hub (คิว Outbox) · นอกนั้นอ่านอย่างเดียว
  */
 const VER = chrome.runtime.getManifest().version;
 const VER_URL = 'https://kengamp2555.github.io/packing-cam/chathub-ext/version.json';
@@ -13,10 +13,13 @@ const store = {
   get: k => chrome.storage.local.get(k).then(r => r[k]),
   set: (k, v) => chrome.storage.local.set({ [k]: v })
 };
-function ensureAlarm() { chrome.alarms.get('poll', a => { if (!a) chrome.alarms.create('poll', { periodInMinutes: 1, delayInMinutes: 0.1 }); }); }
+function ensureAlarm() {
+  chrome.alarms.get('poll', a => { if (!a) chrome.alarms.create('poll', { periodInMinutes: 1, delayInMinutes: 0.1 }); });
+  chrome.alarms.get('out', a => { if (!a) chrome.alarms.create('out', { periodInMinutes: 0.5, delayInMinutes: 0.2 }); });   // คิวข้อความตอบจาก Chat Hub
+}
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); chrome.runtime.openOptionsPage(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } if (a.name === 'out') processOutbox(); });
 chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   if (msg && msg.cmd === 'pollNow') { pollAll('manual').then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'checkUpdate') { checkUpdate(true).then(r => reply(r)); return true; }
@@ -41,6 +44,36 @@ async function checkUpdate(force) {
 }
 
 let busy = false;
+/* ---------- ส่งข้อความที่ตอบจาก Chat Hub (คิว Outbox) ---------- */
+async function hubPost(hubUrl, body) {
+  const r = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+  return r.json();
+}
+async function processOutbox() {
+  if (busy) return;
+  const hubUrl = await store.get('hubUrl'); if (!hubUrl) return;
+  const chs = [];
+  if ((await store.get('lzOn')) !== false) chs.push(LZ_CH);
+  const spCh = await store.get('spCh'); if ((await store.get('spOn')) !== false && spCh) chs.push(spCh);
+  if (!chs.length) return;
+  busy = true; let sent = 0;
+  try {
+    const j = await hubPost(hubUrl, { cmd: 'outbox', chs, ver: VER });
+    for (const it of (j && j.items) || []) {
+      let res;
+      try {
+        if (it.ch === LZ_CH) { const tab = await lazadaTab(); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: lzSendInPage, args: [it.uid, it.text] }))[0].result; }
+        else { const tab = await shopeeTab(true); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: spSendInPage, args: [it.uid, it.text] }))[0].result; }
+      } catch (e) { res = { error: String(e && e.message || e) }; }
+      res = res || { error: 'ไม่มีผลตอบกลับจากหน้าเว็บ' };
+      if (res.ok) sent++;
+      await hubPost(hubUrl, { cmd: 'outboxDone', id: it.id, ok: !!res.ok, error: res.error || '' });
+    }
+  } catch (e) { console.warn('outbox', e); }
+  finally { busy = false; }
+  if (sent) setTimeout(() => pollAll('afterSend'), 3000);   // ดึงข้อความจริงกลับมาแทนตัวชั่วคราว
+}
+
 async function pollAll(why) {
   if (busy) return { ok: false, msg: 'กำลังทำงานอยู่' };
   busy = true;
@@ -102,9 +135,9 @@ async function pollLazada(hubUrl) {
 /* ---------- Shopee (Seller Centre แชท · ร้านที่ล็อกอินอยู่ในเบราว์เซอร์นี้) ---------- */
 const SP_CHAT = 'https://seller.shopee.co.th/new-webchat/conversations';
 const SP_CH = { kengann9: 'shopee-kengann9', keng77: 'shopee-keng77' };   // ชื่อผู้ใช้ร้าน → ช่องทางใน Chat Hub
-async function shopeeTab() {
+async function shopeeTab(needChat) {
   const tabs = await chrome.tabs.query({ url: 'https://seller.shopee.co.th/*' });
-  let t = tabs.find(x => /webchat/.test(x.url || '')) || tabs[0];
+  let t = tabs.find(x => /new-webchat/.test(x.url || '')) || (needChat ? null : tabs[0]);
   if (!t) { t = await chrome.tabs.create({ url: SP_CHAT, active: false, pinned: true }); await waitComplete(t.id); }
   try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
   if (t.discarded) { await chrome.tabs.reload(t.id); await waitComplete(t.id); }
@@ -122,6 +155,7 @@ async function pollShopee(hubUrl) {
   }
   const ch = SP_CH[String(r.user || '').toLowerCase()];
   if (!ch) return { error: 'ร้าน Shopee "' + r.user + '" ยังไม่มีใน Chat Hub' };
+  await store.set('spCh', ch);
   const fresh = await sendHub(hubUrl, ch, 'shopee', { shopId: r.shopId }, r.items);
   const first = !all[r.user];
   all[r.user] = { since: r.since, seen: r.seen };
@@ -189,6 +223,60 @@ async function spPollInPage(all) {
   }
   items.sort((a, b) => a.at - b.at);
   return { user, shopId, since: state.since, seen, items, checked };
+}
+
+/* รันในหน้าแชท Shopee (world: MAIN) · ส่งแบบเดียวกับคนพิมพ์: เปิดแชท → ใส่ข้อความในช่องพิมพ์ → Enter
+ * ใช้ปุ่ม/ช่องพิมพ์ของหน้าเว็บเอง (ระบบของ Shopee ทำงานตามปกติทุกอย่าง) · ไม่ยุ่งถ้ามีข้อความพิมพ์ค้างอยู่ */
+async function spSendInPage(convId, text) {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const fiberProps = el => { const k = Object.keys(el).find(x => x.startsWith('__reactFiber')); let f = k && el[k]; for (let i = 0; i < 8 && f; i++, f = f.return) { const p = f.memoizedProps; if (p && p.conversation && p.conversation.id) return p; } return null; };
+  const cells = () => [...document.querySelectorAll('[data-cy^="webchat-conversation-cell-root"]')];
+  let grid = null;
+  for (let i = 0; i < 40 && !(grid = document.querySelector('[data-cy="webchat-conversation-list"] .ReactVirtualized__Grid')); i++) await sleep(500);
+  if (!grid) return { error: 'หน้าแชท Shopee ยังโหลดไม่เสร็จ หรือออกจากระบบแล้ว' };
+  const current = () => { const c = document.querySelector('[data-cy="webchat-conversation-cell-root-current"]'); const p = c && fiberProps(c); return p ? String(p.conversation.id) : ''; };
+  if (current() !== String(convId)) {
+    let cell = null; grid.scrollTop = 0; await sleep(500);
+    for (let i = 0; i < 60 && !cell; i++) {
+      cell = cells().find(e => { const p = fiberProps(e); return p && String(p.conversation.id) === String(convId); });
+      if (cell) break;
+      const before = grid.scrollTop; grid.scrollTop += Math.max(200, grid.clientHeight * 0.8); await sleep(350);
+      if (grid.scrollTop === before) break;
+    }
+    if (!cell) return { error: 'ไม่พบแชทนี้ในรายการของหน้า Shopee (อาจเก่าเกินไป) – ตอบในหน้า Shopee แทน' };
+    cell.click();
+    for (let i = 0; i < 30 && current() !== String(convId); i++) await sleep(300);
+    if (current() !== String(convId)) return { error: 'เปิดแชทนี้ในหน้า Shopee ไม่ได้' };
+    await sleep(800);
+  }
+  let ta = null;
+  for (let i = 0; i < 20 && !(ta = document.querySelector('[data-cy="webchat-conversation-detail-input"] textarea')); i++) await sleep(300);
+  if (!ta) return { error: 'ไม่พบช่องพิมพ์ในหน้า Shopee (แชทนี้อาจตอบไม่ได้แล้ว)' };
+  if (ta.value.trim()) return { error: 'มีข้อความพิมพ์ค้างอยู่ในช่องพิมพ์ของหน้า Shopee – ไม่ได้ส่ง (กันทับข้อความที่พิมพ์ไว้)' };
+  const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+  set.call(ta, text); ta.dispatchEvent(new Event('input', { bubbles: true }));
+  await sleep(400);
+  if (ta.value !== text) { set.call(ta, ''); ta.dispatchEvent(new Event('input', { bubbles: true })); return { error: 'ใส่ข้อความในช่องพิมพ์ไม่ได้' }; }
+  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+  for (let i = 0; i < 25 && ta.value; i++) await sleep(300);
+  if (ta.value) { set.call(ta, ''); ta.dispatchEvent(new Event('input', { bubbles: true })); return { error: 'หน้า Shopee ไม่ยอมส่ง (อาจมีหน้าต่างเตือนขึ้น) – ตอบในหน้า Shopee แทน' }; }
+  return { ok: true };
+}
+/* รันในหน้า Lazada (world: MAIN) · ส่งด้วยคำสั่งเดียวกับปุ่มส่งของหน้าแชท Lazada (lib.mtop ของหน้าเว็บเอง) */
+async function lzSendInPage(sessionId, text) {
+  for (let i = 0; i < 30 && !(window.lib && window.lib.mtop); i++) await new Promise(r => setTimeout(r, 500));
+  if (!(window.lib && window.lib.mtop)) return { error: 'หน้า Lazada ยังโหลดไม่เสร็จ หรือออกจากระบบแล้ว' };
+  const p = String(sessionId).split('#'), buyerId = p[4], accountType = p[5] || '1';
+  if (p.length < 6 || !buyerId) return { error: 'รหัสแชท Lazada ไม่ถูกต้อง' };
+  const api = 'mtop.im.receiver.web.seller.imMessage.sendImMessage';
+  try {
+    const r = await window.lib.mtop.request({ v: '1.0', appKey: '4272', timeout: 30000, H5Request: true, type: 'POST', method: 'POST', api, url: api, dataType: 'json', valueType: 'original', 'x-i18n-regionID': 'LAZADA_TH',
+      data: { buyerId, accountType, accessKey: 'lazada-pc-h5', accessToken: 'lazada-test-secret', sessionId, content: JSON.stringify({ txt: text }), templateId: 1, fromAppKey: 'H5_24813843',
+        bizUnique: crypto.randomUUID(), ext: JSON.stringify({ templateId: 1, fromCode: 'sc_seller_default' }), extraAttr: '{}' } });
+    const ret = JSON.stringify((r && r.ret) || '');
+    if (/SUCCESS/.test(ret) || (r && r.data && !/FAIL|ERROR/i.test(ret))) return { ok: true };
+    return { error: 'Lazada ตอบ: ' + ret.slice(0, 150) };
+  } catch (e) { return { error: 'Lazada ไม่รับ: ' + JSON.stringify((e && e.ret) || (e && e.message) || e).slice(0, 150) }; }
 }
 
 async function notifyOnce(key, title, message) {
