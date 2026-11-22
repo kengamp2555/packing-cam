@@ -62,8 +62,8 @@ async function processOutbox() {
     for (const it of (j && j.items) || []) {
       let res;
       try {
-        if (it.ch === LZ_CH) { const tab = await lazadaTab(); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: lzSendInPage, args: [it.uid, it.text] }))[0].result; }
-        else { const tab = await shopeeTab(true); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: spSendInPage, args: [it.uid, it.text] }))[0].result; }
+        if (it.ch === LZ_CH) { const tab = await lazadaTab(); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: lzSendInPage, args: [it.uid, it.text, it.image || null] }))[0].result; }
+        else { const tab = await shopeeTab(true); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: spSendInPage, args: [it.uid, it.text, it.image || null] }))[0].result; }
       } catch (e) { res = { error: String(e && e.message || e) }; }
       res = res || { error: 'ไม่มีผลตอบกลับจากหน้าเว็บ' };
       if (res.ok) sent++;
@@ -228,7 +228,7 @@ async function spPollInPage(all) {
 
 /* รันในหน้าแชท Shopee (world: MAIN) · ส่งแบบเดียวกับคนพิมพ์: เปิดแชท → ใส่ข้อความในช่องพิมพ์ → Enter
  * ใช้ปุ่ม/ช่องพิมพ์ของหน้าเว็บเอง (ระบบของ Shopee ทำงานตามปกติทุกอย่าง) · ไม่ยุ่งถ้ามีข้อความพิมพ์ค้างอยู่ */
-async function spSendInPage(convId, text) {
+async function spSendInPage(convId, text, image) {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const fiberProps = el => { const k = Object.keys(el).find(x => x.startsWith('__reactFiber')); let f = k && el[k]; for (let i = 0; i < 8 && f; i++, f = f.return) { const p = f.memoizedProps; if (p && p.conversation && p.conversation.id) return p; } return null; };
   const cells = () => [...document.querySelectorAll('[data-cy^="webchat-conversation-cell-root"]')];
@@ -254,6 +254,26 @@ async function spSendInPage(convId, text) {
     if (current() !== String(convId)) return { error: 'เปิดแชทนี้ในหน้า Shopee ไม่ได้' };
     await sleep(800);
   }
+  if (image) {   // รูป: ใส่ไฟล์ให้ปุ่มแนบรูปของหน้าแชท (เหมือนคนกดเลือกรูป) แล้วรอดูว่ารูปขึ้นในแชทจริง
+    const box = document.querySelector('[data-cy="webchat-conversation-detail-input"]');
+    const inp = box && [...box.querySelectorAll('input[type=file]')].find(x => /image/.test(x.accept));
+    if (!inp) return { error: 'ไม่พบปุ่มแนบรูปในหน้า Shopee (แชทนี้อาจส่งรูปไม่ได้)' };
+    const ses = JSON.parse(localStorage.getItem('chat-session') || '{}');
+    const ck = Object.fromEntries(document.cookie.split('; ').map(c => { const i = c.indexOf('='); return [c.slice(0, i), c.slice(i + 1)]; }));
+    const tail = '_uid=' + (ses.user || {}).uid + '&_v=9.1.17&csrf_token=&SPC_CDS_CHAT=' + (ck.SPC_CDS_CHAT || '') + '&x-shop-region=TH&_api_source=webchat';
+    const lastImg = async () => {
+      try {
+        const r = await fetch('/webchat/api/v1.2/conversations/' + convId + '/messages?shop_id=' + (ses.shop || {}).id + '&offset=0&limit=5&direction=older&biz_id=0&on_message_received=true&' + tail, { credentials: 'include', headers: { Authorization: 'Bearer ' + ses.token } });
+        const M = await r.json(); const m = (M || []).find(x => x.type === 'image' && String(x.from_shop_id) === String((ses.shop || {}).id)); return m ? String(m.id) : '';
+      } catch (e) { return ''; }
+    };
+    const before = await lastImg();
+    const bin = atob(image.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const dt = new DataTransfer(); dt.items.add(new File([u8], image.name || 'image.jpg', { type: image.mime || 'image/jpeg' }));
+    inp.files = dt.files; inp.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let i = 0; i < 25; i++) { await sleep(1000); const now = await lastImg(); if (now && now !== before) return { ok: true }; }
+    return { error: 'ใส่รูปแล้วแต่ไม่เห็นรูปขึ้นในแชทภายใน 25 วินาที – ตรวจในหน้า Shopee ก่อนส่งใหม่ (อาจมีหน้าต่างให้กดยืนยัน)' };
+  }
   let ta = null;
   for (let i = 0; i < 20 && !(ta = document.querySelector('[data-cy="webchat-conversation-detail-input"] textarea')); i++) await sleep(300);
   if (!ta) return { error: 'ไม่พบช่องพิมพ์ในหน้า Shopee (แชทนี้อาจตอบไม่ได้แล้ว)' };
@@ -268,16 +288,28 @@ async function spSendInPage(convId, text) {
   return { ok: true };
 }
 /* รันในหน้า Lazada (world: MAIN) · ส่งด้วยคำสั่งเดียวกับปุ่มส่งของหน้าแชท Lazada (lib.mtop ของหน้าเว็บเอง) */
-async function lzSendInPage(sessionId, text) {
+async function lzSendInPage(sessionId, text, image) {
   for (let i = 0; i < 30 && !(window.lib && window.lib.mtop); i++) await new Promise(r => setTimeout(r, 500));
   if (!(window.lib && window.lib.mtop)) return { error: 'หน้า Lazada ยังโหลดไม่เสร็จ หรือออกจากระบบแล้ว' };
-  const p = String(sessionId).split('#'), buyerId = p[4], accountType = p[5] || '1';
-  if (p.length < 6 || !buyerId) return { error: 'รหัสแชท Lazada ไม่ถูกต้อง' };
+  // รหัสแชท "1#103#<id>#<ประเภท>#<id>#<ประเภท>" · ลูกค้า = ฝั่งที่ประเภทเป็น 1 (ลำดับสลับได้)
+  const p = String(sessionId).split('#'), bi = p[3] === '1' ? 2 : p[5] === '1' ? 4 : -1;
+  if (p.length < 6 || bi < 0) return { error: 'รหัสแชท Lazada ไม่ถูกต้อง' };
+  const buyerId = p[bi], accountType = '1';
+  let content = JSON.stringify({ txt: text }), templateId = 1;
+  if (image) {   // รูป: อัปโหลดเข้าที่เก็บไฟล์แชทของ Lazada (แบบเดียวกับปุ่มแนบรูป) แล้วส่งเป็นข้อความรูป
+    try {
+      const bin = atob(image.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const fd = new FormData(); fd.append('file', new Blob([u8], { type: image.mime || 'image/jpeg' }), image.name || 'image.jpg'); fd.append('bizCode', 'lazada_th_im_seller');
+      const up = await (await fetch('https://filebroker.lazada.co.th/upload/public', { method: 'POST', body: fd, credentials: 'include' })).json();
+      if (!up || up.code !== 0 || !up.url) return { error: 'อัปโหลดรูปเข้า Lazada ไม่สำเร็จ: ' + JSON.stringify(up).slice(0, 120) };
+      content = JSON.stringify({ image: up.url, imgUrl: up.url, width: up.width || image.w || 0, height: up.height || image.h || 0 }); templateId = 3;
+    } catch (e) { return { error: 'อัปโหลดรูปเข้า Lazada ไม่สำเร็จ: ' + (e && e.message || e) }; }
+  }
   const api = 'mtop.im.receiver.web.seller.imMessage.sendImMessage';
   try {
     const r = await window.lib.mtop.request({ v: '1.0', appKey: '4272', timeout: 30000, H5Request: true, type: 'POST', method: 'POST', api, url: api, dataType: 'json', valueType: 'original', 'x-i18n-regionID': 'LAZADA_TH',
-      data: { buyerId, accountType, accessKey: 'lazada-pc-h5', accessToken: 'lazada-test-secret', sessionId, content: JSON.stringify({ txt: text }), templateId: 1, fromAppKey: 'H5_24813843',
-        bizUnique: crypto.randomUUID(), ext: JSON.stringify({ templateId: 1, fromCode: 'sc_seller_default' }), extraAttr: '{}' } });
+      data: { buyerId, accountType, accessKey: 'lazada-pc-h5', accessToken: 'lazada-test-secret', sessionId, content, templateId, fromAppKey: 'H5_24813843',
+        bizUnique: crypto.randomUUID(), ext: JSON.stringify(templateId === 1 ? { templateId: 1, fromCode: 'sc_seller_default' } : { fromCode: 'sc_seller_default' }), extraAttr: '{}' } });
     const ret = JSON.stringify((r && r.ret) || '');
     if (/SUCCESS/.test(ret) || (r && r.data && !/FAIL|ERROR/i.test(ret))) return { ok: true };
     return { error: 'Lazada ตอบ: ' + ret.slice(0, 150) };

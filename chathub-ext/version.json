@@ -1,5 +1,5 @@
 {
-  "version": "0.4.2",
+  "version": "0.5.0",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "ส่งสถานะ \"ลูกค้าอ่านแล้ว / ยังไม่อ่าน\" เข้า Chat Hub"
+  "notes": "ส่งรูปจาก Chat Hub ได้ (Shopee / Lazada) · แก้ส่ง Lazada บางแชท"
 }
