@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.4.1",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "ตอบแชท Shopee / Lazada จาก Chat Hub ได้แล้ว"
+  "notes": "แก้ส่ง Shopee: หาแชทไม่เจอเมื่อหน้าแชทเปิดแท็บ \"สำคัญ\" อยู่"
 }

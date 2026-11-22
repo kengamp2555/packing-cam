@@ -236,6 +236,10 @@ async function spSendInPage(convId, text) {
   if (!grid) return { error: 'หน้าแชท Shopee ยังโหลดไม่เสร็จ หรือออกจากระบบแล้ว' };
   const current = () => { const c = document.querySelector('[data-cy="webchat-conversation-cell-root-current"]'); const p = c && fiberProps(c); return p ? String(p.conversation.id) : ''; };
   if (current() !== String(convId)) {
+    // หน้าแชทเปิดแท็บ "สำคัญ" ไว้ (แบ่งกลุ่ม ปักหมุด / ตอบกลับอัตโนมัติ / ตอบกลับเอง แสดงทีละกลุ่ม) → สลับไปแท็บ "ทั้งหมด" ให้เห็นทุกแชทเรียงกัน
+    const wrap = document.querySelector('[data-cy="webchat-conversation-list-wrapper"]');
+    const allTab = wrap && [...wrap.querySelectorAll('*')].find(e => (e.innerText || '').trim() === 'ทั้งหมด' && ![...e.children].some(c => (c.innerText || '').trim() === 'ทั้งหมด'));
+    if (allTab) { allTab.click(); await sleep(1200); grid = document.querySelector('[data-cy="webchat-conversation-list"] .ReactVirtualized__Grid') || grid; }
     let cell = null; grid.scrollTop = 0; await sleep(500);
     for (let i = 0; i < 60 && !cell; i++) {
       cell = cells().find(e => { const p = fiberProps(e); return p && String(p.conversation.id) === String(convId); });
