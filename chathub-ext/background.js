@@ -21,10 +21,11 @@ function ensureAlarm() {
 }
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); chrome.runtime.openOptionsPage(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } if (a.name === 'out') processOutbox(); if (a.name === 'jobs') runJobs(); });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } if (a.name === 'out') processOutbox(); if (a.name === 'jobs') { runJobs(); runCatalog(); } });
 chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   if (msg && msg.cmd === 'pollNow') { pollAll('manual').then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'outboxNow') { outboxSoon(); reply({ ok: true }); return; }   // สะกิดจากหน้า Chat Hub (hubpoke.js)
+  if (msg && msg.cmd === 'catalogNow') { runCatalog(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'runJobs') { runJobs(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'checkUpdate') { checkUpdate(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'reset') { chrome.storage.local.remove(['lzState', 'spState']).then(() => reply({ ok: true })); return true; }
@@ -89,6 +90,87 @@ async function runJobs(manual) {
   finally { jobsBusy = false; }
   await store.set('jobsLast', out);
   return out;
+}
+
+/* ---------- 📦 รายการสินค้า (ให้กล่องค้นหาสินค้าใน Chat Hub) ----------
+ * วันละครั้ง: อ่านรายการสินค้าที่ขายอยู่จากหน้า Seller Centre (Shopee ร้านที่ล็อกอิน · Lazada) → ส่งเข้า Chat Hub ทั้งชุด
+ * อ่านอย่างเดียว · ใช้แท็บแชทที่ปักหมุดไว้ */
+let catBusy = false;
+async function runCatalog(force) {
+  if (catBusy) return store.get('catLast');
+  const hubUrl = await store.get('hubUrl'); if (!hubUrl) return null;
+  const last = (await store.get('catAt')) || {}, now = Date.now(), out = { at: now, res: {} };
+  catBusy = true;
+  try {
+    if ((await store.get('lzOn')) !== false && (force || !last[LZ_CH] || now - last[LZ_CH] > 20 * 3600e3)) {
+      try {
+        const tab = await lazadaTab();
+        const r = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: lzCatalogInPage }))[0].result;
+        if (!r || r.error) throw new Error((r && r.error) || 'อ่านหน้า Lazada ไม่ได้');
+        const j = await hubPost(hubUrl, { cmd: 'catalog', ch: LZ_CH, items: r.items, ver: VER });
+        if (!j || !j.ok) throw new Error((j && j.error) || 'Chat Hub ไม่รับ');
+        last[LZ_CH] = now; out.res.lazada = r.items.length + ' รายการ';
+      } catch (e) { out.res.lazada = '❌ ' + (e && e.message || e); }
+    }
+    const spCh = await store.get('spCh');
+    if ((await store.get('spOn')) !== false && spCh && (force || !last[spCh] || now - last[spCh] > 20 * 3600e3)) {
+      try {
+        const tab = await shopeeTab();
+        const r = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: spCatalogInPage }))[0].result;
+        if (!r || r.error) throw new Error((r && r.error) || 'อ่านหน้า Shopee ไม่ได้');
+        const ch = SP_CH[String(r.user || '').toLowerCase()];
+        if (!ch) throw new Error('ร้าน ' + r.user + ' ยังไม่มีใน Chat Hub');
+        const j = await hubPost(hubUrl, { cmd: 'catalog', ch, items: r.items, ver: VER });
+        if (!j || !j.ok) throw new Error((j && j.error) || 'Chat Hub ไม่รับ');
+        last[ch] = now; out.res.shopee = r.user + ' ' + r.items.length + ' รายการ';
+      } catch (e) { out.res.shopee = '❌ ' + (e && e.message || e); }
+    }
+    await store.set('catAt', last);
+  } finally { catBusy = false; }
+  if (Object.keys(out.res).length) await store.set('catLast', out);
+  return out;
+}
+/* รันในหน้า Shopee Seller Centre: รายการสินค้าที่ขายอยู่ (หน้าละ 48) */
+async function spCatalogInPage() {
+  const ses = JSON.parse(localStorage.getItem('chat-session') || 'null');
+  if (!ses || !ses.shop) return { error: 'ต้องล็อกอิน Shopee' };
+  const ck = Object.fromEntries(document.cookie.split('; ').map(c => { const i = c.indexOf('='); return [c.slice(0, i), c.slice(i + 1)]; }));
+  const shopId = ses.shop.id, items = []; let total = 1;
+  for (let p = 1; (p - 1) * 48 < total && p <= 80; p++) {
+    const r = await fetch('/api/v3/opt/mpsku/list/v2/get_product_list?SPC_CDS=' + encodeURIComponent(ck.SPC_CDS || '') + '&SPC_CDS_VER=2&page_number=' + p + '&page_size=48&list_type=live_all&need_ads=false', { credentials: 'include' });
+    const j = await r.json();
+    if (j.code !== 0) return { error: 'Shopee ตอบ: ' + String(j.msg || j.code).slice(0, 100) };
+    total = (j.data.page_info || {}).total || 0;
+    (j.data.products || []).forEach(x => {
+      const pd = x.price_detail || {}, lo = pd.selling_price_min || pd.price_min, hi = pd.selling_price_max || pd.price_max;
+      items.push({ id: String(x.id), name: x.name || '', sku: x.parent_sku || '', price: lo == hi ? '฿' + lo : '฿' + lo + '–' + hi, stock: Number((x.stock_detail || {}).total_available_stock || 0),
+        img: x.cover_image ? 'https://cf.shopee.co.th/file/' + x.cover_image + '_tn' : '', url: 'https://shopee.co.th/product/' + shopId + '/' + x.id });
+    });
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return { user: ses.user && ses.user.name, items };
+}
+/* รันในหน้า Lazada Seller Center: รายการสินค้าที่ขายอยู่ (หน้าละ 100) */
+async function lzCatalogInPage() {
+  for (let i = 0; i < 30 && !(window.lib && window.lib.mtop); i++) await new Promise(r => setTimeout(r, 500));
+  if (!(window.lib && window.lib.mtop)) return { error: 'หน้า Lazada ยังโหลดไม่เสร็จ หรือออกจากระบบแล้ว' };
+  const api = 'mtop.lazada.merchant.product.manager.simple.render.list', items = []; let total = 1;
+  for (let p = 1; (p - 1) * 100 < total && p <= 60; p++) {
+    let r;
+    try {
+      r = await window.lib.mtop.request({ v: '1.0', appKey: '4272', timeout: 30000, H5Request: true, type: 'GET', method: 'GET', api, url: api, dataType: 'json', valueType: 'original', 'x-i18n-regionID': 'LAZADA_TH',
+        data: { bizParam: JSON.stringify({ version: 'simple', allFormData: { tab: 'online_product' }, type: 'simple' }), jsonBody: JSON.stringify({ tab: 'online_product', table: { sort: {} }, filter: {}, pagination: { current: p, pageSize: 100 } }) } });
+    } catch (e) { return { error: 'Lazada ตอบผิดพลาด: ' + JSON.stringify((e && e.ret) || e).slice(0, 100) }; }
+    const d = (r.data && r.data.data) || {};
+    total = ((d.pagination || {}).total) || 0;
+    ((d.table || {}).dataSource || []).forEach(x => {
+      const it = x.itemDesc || {}, pr = (x.price || {}).price || '';
+      items.push({ id: String(x.productId || x.itemId || ''), name: it.title || '', sku: '', price: pr ? '฿' + String(pr).replace(/-/, '–') : '', stock: Number(String((x.stock || {}).text || '0').replace(/[^\d]/g, '')) || 0,
+        img: it.imageUrl || '', url: it.pdpLink || (x.productId ? 'https://www.lazada.co.th/products/i' + x.productId + '.html' : '') });
+    });
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return { items };
 }
 
 /* ---------- เช็กเวอร์ชันใหม่ (วันละไม่กี่ครั้ง) ---------- */

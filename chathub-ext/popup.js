@@ -29,5 +29,6 @@ function showJobs(j, on) {
 }
 chrome.storage.local.get(['jobsLast', 'jobsOn']).then(r => showJobs(r.jobsLast, r.jobsOn));
 $('jobsNow').onclick = async () => { $('jobsNow').disabled = true; const r = await chrome.runtime.sendMessage({ cmd: 'runJobs' }); showJobs(r, true); $('jobsNow').disabled = false; };
+$('catNow').onclick = async () => { const b = $('catNow'); b.disabled = true; b.textContent = '⏳ กำลังอ่านรายการสินค้า (1–2 นาที)…'; const r = await chrome.runtime.sendMessage({ cmd: 'catalogNow' }); b.textContent = '📦 ' + (r && r.res ? Object.values(r.res).join(' · ') : 'เสร็จ'); b.disabled = false; };
 $('hub').onclick = async () => { const r = await load(); if (r.hubUrl) chrome.tabs.create({ url: r.hubUrl.split('?')[0] }); };
 $('opt').onclick = () => chrome.runtime.openOptionsPage();

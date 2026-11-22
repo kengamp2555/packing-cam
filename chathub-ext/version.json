@@ -1,5 +1,5 @@
 {
-  "version": "0.7.1",
+  "version": "0.8.0",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "รูปที่ลูกค้า Lazada ส่งมา ขึ้นใน Chat Hub แล้ว"
+  "notes": "รายการสินค้า Shopee / Lazada สำหรับกล่องค้นหาสินค้าใน Chat Hub"
 }
