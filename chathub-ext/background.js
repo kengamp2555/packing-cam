@@ -435,8 +435,19 @@ async function lzPollInPage(state) {
     checked++;
     try {
       const r = await req('mtop.im.use.seller.messagebox.queryMessageListBySessionId', Object.assign({ sessionViewId: sv.sessionId, startTime: String(Date.now()), fetchCount: 20, isDownward: false }, base));
-      ((r.data && r.data.result) || []).filter(m => mid(m) && at(m) > prev)
-        .forEach(m => items.push({ uid: sv.sessionId, name: sd.title || '', pic: sd.headUrl || '', at: at(m), msgId: String(mid(m)), raw: m }));
+      const fresh = ((r.data && r.data.result) || []).filter(m => mid(m) && at(m) > prev);
+      // รูปที่ลูกค้าส่งมามีแค่รหัสไฟล์ (osskey) → ขอลิงก์ดาวน์โหลด (อายุ 7 วัน) แบบเดียวกับหน้าแชท Lazada · Chat Hub จะดาวน์โหลดเก็บลง Drive เอง
+      const sp = String(sv.sessionId).split('#'), buyerId = sp[3] === '1' ? sp[2] : sp[5] === '1' ? sp[4] : '';
+      for (const m of fresh) {
+        const b = m.body || {}; let td = {}; try { td = JSON.parse(b.templateData || '{}'); } catch (e) { }
+        if (td.osskey && buyerId && !/^https?:/.test(td.imgUrl || td.image || '')) {
+          try {
+            const dr = await req('mtop.im.use.web.seller.mtopimmediaservice.getDownloadToken', { accessKey: base.accessKey, accessToken: base.accessToken, accountType: '1', buyerId, objectKey: td.osskey });
+            if (dr && dr.data && dr.data.downloadUrl) m._dl = dr.data.downloadUrl;
+          } catch (e) { }
+        }
+        items.push({ uid: sv.sessionId, name: sd.title || '', pic: sd.headUrl || '', at: at(m), msgId: String(mid(m)), raw: m });
+      }
       seen[sv.sessionId] = last;
     } catch (e) { /* แชทนี้ลองใหม่รอบหน้า */ }
     await new Promise(r => setTimeout(r, 400));

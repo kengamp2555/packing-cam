@@ -1,5 +1,5 @@
 {
-  "version": "0.7.0",
+  "version": "0.7.1",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "ตอบ Shopee / Lazada จาก Chat Hub ใน Chrome เครื่องนี้ ส่งทันที (ไม่ต้องรอ 30 วินาที)"
+  "notes": "รูปที่ลูกค้า Lazada ส่งมา ขึ้นใน Chat Hub แล้ว"
 }
