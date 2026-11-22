@@ -24,6 +24,7 @@ chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } if (a.name === 'out') processOutbox(); if (a.name === 'jobs') runJobs(); });
 chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   if (msg && msg.cmd === 'pollNow') { pollAll('manual').then(r => reply(r)); return true; }
+  if (msg && msg.cmd === 'outboxNow') { outboxSoon(); reply({ ok: true }); return; }   // สะกิดจากหน้า Chat Hub (hubpoke.js)
   if (msg && msg.cmd === 'runJobs') { runJobs(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'checkUpdate') { checkUpdate(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'reset') { chrome.storage.local.remove(['lzState', 'spState']).then(() => reply({ ok: true })); return true; }
@@ -112,8 +113,12 @@ async function hubPost(hubUrl, body) {
   const r = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
   return r.json();
 }
+let outboxAgain = false;
+/** ส่งคิวทันที · ถ้ากำลังดึงแชท / ส่งอยู่ → ทำต่อทันทีที่เสร็จ */
+function outboxSoon() { if (busy) outboxAgain = true; else processOutbox(); }
 async function processOutbox() {
-  if (busy) return;
+  if (busy) { outboxAgain = true; return; }
+  outboxAgain = false;
   const hubUrl = await store.get('hubUrl'); if (!hubUrl) return;
   const chs = [];
   if ((await store.get('lzOn')) !== false) chs.push(LZ_CH);
@@ -133,7 +138,7 @@ async function processOutbox() {
       await hubPost(hubUrl, { cmd: 'outboxDone', id: it.id, ok: !!res.ok, error: res.error || '' });
     }
   } catch (e) { console.warn('outbox', e); }
-  finally { busy = false; }
+  finally { busy = false; if (outboxAgain) setTimeout(processOutbox, 0); }
   if (sent) setTimeout(() => pollAll('afterSend'), 3000);   // ดึงข้อความจริงกลับมาแทนตัวชั่วคราว
 }
 
@@ -148,7 +153,7 @@ async function pollAll(why) {
     if ((await store.get('spOn')) !== false) { try { st.shopee = await pollShopee(url); } catch (e) { st.shopee = { error: String(e && e.message || e) }; } }
     st.ok = true;
   } catch (e) { st.ok = false; st.error = String(e && e.message || e); }
-  finally { busy = false; }
+  finally { busy = false; if (outboxAgain) setTimeout(processOutbox, 0); }
   await store.set('lastRun', st);
   badge(st);
   return st;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "🧰 KengAmp ผู้ช่วยร้าน",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "ผู้ช่วยร้าน KengAmp: รับ-ส่งแชท Shopee / Lazada เข้า Chat Hub และเปิดหน้าที่ POS ต้องใช้ให้เองตามรอบ",
   "permissions": [
     "alarms",
@@ -34,5 +34,17 @@
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.googleusercontent.com/*"
+      ],
+      "js": [
+        "hubpoke.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_start"
+    }
+  ]
 }

@@ -1,5 +1,5 @@
 {
-  "version": "0.6.2",
+  "version": "0.7.0",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "แก้ส่งรูป Shopee: รูปค้างในถาด ไม่ถูกกดส่ง"
+  "notes": "ตอบ Shopee / Lazada จาก Chat Hub ใน Chrome เครื่องนี้ ส่งทันที (ไม่ต้องรอ 30 วินาที)"
 }
