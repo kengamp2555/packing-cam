@@ -1,5 +1,5 @@
 {
-  "version": "0.4.1",
+  "version": "0.4.2",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "แก้ส่ง Shopee: หาแชทไม่เจอเมื่อหน้าแชทเปิดแท็บ \"สำคัญ\" อยู่"
+  "notes": "ส่งสถานะ \"ลูกค้าอ่านแล้ว / ยังไม่อ่าน\" เข้า Chat Hub"
 }

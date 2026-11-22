@@ -127,7 +127,7 @@ async function pollLazada(hubUrl) {
     if (r.error === 'login') await notifyOnce('lzlogin', 'Lazada Seller Center ออกจากระบบแล้ว', 'เปิดแท็บ Lazada ที่ปักหมุดไว้ แล้วล็อกอินใหม่');
     return { error: r.error === 'login' ? 'ต้องล็อกอิน Lazada ใหม่' : r.error };
   }
-  const fresh = await sendHub(hubUrl, LZ_CH, 'lazada', {}, r.items);
+  const fresh = await sendHub(hubUrl, LZ_CH, 'lazada', {}, r.items, r.threads);
   await store.set('lzState', { since: state.since, seen: r.seen });
   if (fresh.length && state.seen && Object.keys(state.seen).length) notifyNew('Lazada', fresh);   // ไม่เด้งตอนดึงครั้งแรก
   return { sessions: r.checked, items: r.items.length, newIn: fresh.length };
@@ -156,7 +156,7 @@ async function pollShopee(hubUrl) {
   const ch = SP_CH[String(r.user || '').toLowerCase()];
   if (!ch) return { error: 'ร้าน Shopee "' + r.user + '" ยังไม่มีใน Chat Hub' };
   await store.set('spCh', ch);
-  const fresh = await sendHub(hubUrl, ch, 'shopee', { shopId: r.shopId }, r.items);
+  const fresh = await sendHub(hubUrl, ch, 'shopee', { shopId: r.shopId }, r.items, r.threads);
   const first = !all[r.user];
   all[r.user] = { since: r.since, seen: r.seen };
   await store.set('spState', all);
@@ -164,10 +164,10 @@ async function pollShopee(hubUrl) {
   return { shop: r.user, sessions: r.checked, items: r.items.length, newIn: fresh.length };
 }
 /** ส่งข้อมูลดิบเข้า Chat Hub ทีละ 40 ข้อความ · คืนรายการข้อความลูกค้าที่เพิ่งเข้าใหม่ (Chat Hub เป็นคนบอก) */
-async function sendHub(hubUrl, ch, src, ctx, items) {
+async function sendHub(hubUrl, ch, src, ctx, items, threads) {
   const fresh = [];
-  for (let i = 0; i < items.length; i += 40) {
-    const resp = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ch, src, ctx, ver: VER, items: items.slice(i, i + 40) }) });
+  for (let i = 0; i < Math.max(items.length, 1); i += 40) {   // อย่างน้อย 1 ครั้งเสมอ (ส่งข้อมูลห้องแชท = สถานะอ่าน แม้ไม่มีข้อความใหม่)
+    const resp = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ch, src, ctx, ver: VER, items: items.slice(i, i + 40), threads: i === 0 ? (threads || []) : [] }) });
     let j = null; try { j = await resp.json(); } catch (e) { }
     if (!j || !j.ok) throw new Error('Chat Hub ไม่รับข้อมูล' + (j && j.error ? ' (' + j.error + ')' : ' – ตรวจลิงก์ในตั้งค่า'));
     (j.fresh || []).forEach(x => fresh.push(x));
@@ -198,7 +198,7 @@ async function spPollInPage(all) {
   catch (e) { return { error: e.message === 'login' ? 'login' : e.message }; }
   const shopId = String(ses.shop && ses.shop.id || ''), seen = Object.assign({}, state.seen || {}), items = [];
   /* ตัดส่วนที่ไม่ใช้ (คำแปลหลายภาษา ข้อมูลติดตาม) ให้ข้อมูลดิบเล็กลง · ที่เหลือส่งทั้งก้อนให้ Chat Hub แปลงเอง */
-  const DROP = /^(translated_text|buyer_translated_text|translated_with_lang|translated_text_list|noti_text_of_all_languages|follow_up_question|tracking_play_load|msg_tag|msg_attr|crm_activity_id|warning|waring_tip_types|feedback_info|request_id|region|country|model_price_info|selling_point|review_bar|edt|image_overlays_hash|pass_through_data)$/;
+  const DROP = /^(translated_text|buyer_translated_text|translated_with_lang|translated_text_list|noti_text_of_all_languages|follow_up_question|tracking_play_load|msg_tag|msg_attr|crm_activity_id|warning|waring_tip_types|feedback_info|request_id|region|country|model_price_info|selling_point|review_bar|edt|image_overlays_hash|pass_through_data|crm_message_preview|crm_sender_message_preview|latest_message_content|attributes|official_chat|choice_entity)$/;
   const slim = (v, d) => {
     if (d > 8 || v == null) return v;
     if (Array.isArray(v)) return v.slice(0, 8).map(x => slim(x, d + 1));
@@ -222,7 +222,8 @@ async function spPollInPage(all) {
     await new Promise(r => setTimeout(r, 300));
   }
   items.sort((a, b) => a.at - b.at);
-  return { user, shopId, since: state.since, seen, items, checked };
+  const threads = (convs || []).filter(c => c && c.id).map(c => ({ uid: String(c.id), raw: slim(c, 0) }));   // ห้องแชท (สถานะอ่าน ฯลฯ) ให้ Chat Hub แปลงเอง
+  return { user, shopId, since: state.since, seen, items, checked, threads };
 }
 
 /* รันในหน้าแชท Shopee (world: MAIN) · ส่งแบบเดียวกับคนพิมพ์: เปิดแชท → ใส่ข้อความในช่องพิมพ์ → Enter
@@ -319,5 +320,6 @@ async function lzPollInPage(state) {
     await new Promise(r => setTimeout(r, 400));
   }
   items.sort((a, b) => a.at - b.at);
-  return { items, seen, checked };
+  const threads = sessions.filter(sv => sv.sessionId).map(sv => ({ uid: sv.sessionId, raw: sv }));   // ห้องแชท (สถานะอ่าน ฯลฯ) ให้ Chat Hub แปลงเอง
+  return { items, seen, checked, threads };
 }
