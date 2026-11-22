@@ -1,27 +1,36 @@
 <!DOCTYPE html>
-<html lang="th"><head><meta charset="utf-8"><title>ตั้งค่า Chat Hub Connector</title>
+<html lang="th"><head><meta charset="utf-8"><title>ตั้งค่า KengAmp ผู้ช่วยร้าน</title>
 <style>
   body { font-family: system-ui, "Sarabun", sans-serif; max-width: 640px; margin: 30px auto; padding: 0 16px; color: #1d2430; background: #f4f6f9; }
-  .card { background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+  h2 { margin:0 0 10px; } h3 { margin:0 0 8px; font-size:16px; }
+  .card { background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.06); margin-bottom: 14px; }
   input[type=text] { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #d8dee6; border-radius: 10px; font-size: 14px; }
   button { margin-top: 12px; padding: 9px 18px; border: 0; border-radius: 10px; background: #2f6fed; color: #fff; font-weight: 700; cursor: pointer; }
   button.g { background: #eef2f7; color: #1d2430; }
   .hint { font-size: 13px; color: #6b7685; line-height: 1.6; }
   #msg { margin-top: 10px; font-weight: 600; }
 </style></head>
-<body><div class="card">
-  <h2 style="margin-top:0">💬 Chat Hub Connector · ตั้งค่า</h2>
-  <p class="hint">1) เปิดแอป Chat Hub → ⚙ ตั้งค่า → กล่อง "Lazada / Shopee" → กด <b>คัดลอก</b> ลิงก์ แล้ววางที่นี่<br>
-  2) ล็อกอิน Lazada Seller Center และ Shopee Seller Centre ไว้ใน Chrome นี้ (ส่วนเสริมจะเปิดแท็บแชทปักหมุดไว้ให้เอง – ไม่ต้องปิด)</p>
-  <label><b>ลิงก์ Chat Hub (สำหรับส่วนเสริม)</b></label>
+<body>
+<h2>🧰 KengAmp ผู้ช่วยร้าน · ตั้งค่า</h2>
+<p class="hint" style="margin-top:-6px">ส่วนเสริมตัวเดียว ทำ 2 งาน: 💬 รับ-ส่งแชท Shopee / Lazada เข้า Chat Hub และ 🟢 เปิดหน้าที่ POS ต้องใช้ให้เองตามรอบ · ทำงานเมื่อ Chrome เปิดอยู่</p>
+<div class="card">
+  <h3>🔗 การเชื่อมต่อ</h3>
+  <p class="hint">เปิดแอป Chat Hub → ⚙ ตั้งค่า → กล่อง "ส่วนเสริม KengAmp ผู้ช่วยร้าน" → กด <b>คัดลอก</b> ลิงก์ แล้ววางที่นี่ (ใช้ร่วมกันทั้ง 2 งาน · ห้ามเผยแพร่ลิงก์)</p>
   <input type="text" id="url" placeholder="https://script.google.com/macros/s/…/exec?src=ext&k=…">
-  <p><label><input type="checkbox" id="lz" checked> ดึงแชท Lazada (KengAmp)</label><br>
-  <label><input type="checkbox" id="sp" checked> ดึงแชท Shopee (ร้านที่ล็อกอิน Seller Centre อยู่ในเบราว์เซอร์นี้)</label><br>
-  <label><input type="checkbox" id="jobs" checked> 🟢 งานเบื้องหลัง: เปิดหน้าใน "สิ่งที่ต้องเปิด / ทำ" ของ POS ให้เองตามรอบ (หน้าคืนเงิน Shopee · รายรับ · LnwShop · การเงิน Lazada) – ต้องมีสคริปต์ Tampermonkey เดิมอยู่</label></p>
-  <p class="hint">ดึงแชททุก 1 นาที · ส่งเฉพาะข้อความที่คุณพิมพ์ตอบใน Chat Hub (เช็กคิวทุก 30 วินาที) · ทำงานเมื่อ Chrome เปิดอยู่ · ห้ามปิดแท็บแชท Shopee / Lazada ที่ปักหมุดไว้</p>
-  <button id="save">บันทึก แล้วลองดึงเลย</button>
-  <button class="g" id="reset" title="ล้างความจำว่าอ่านแชทถึงไหน – รอบหน้าดึงย้อน 3 วันใหม่ (ข้อความซ้ำจะไม่ถูกบันทึกซ้ำ)">ล้างความจำ</button>
-  <div id="msg"></div>
 </div>
+<div class="card">
+  <h3>💬 แชท (Chat Hub)</h3>
+  <label><input type="checkbox" id="lz" checked> Lazada (KengAmp)</label><br>
+  <label><input type="checkbox" id="sp" checked> Shopee (ร้านที่ล็อกอิน Seller Centre อยู่ใน Chrome นี้)</label>
+  <p class="hint">ดึงแชททุก 1 นาที · ส่งเฉพาะข้อความ/รูปที่คุณตอบใน Chat Hub (เช็กคิวทุก 30 วินาที) · ห้ามปิดแท็บแชท Shopee / Lazada ที่ปักหมุดไว้</p>
+  <button class="g" id="reset" title="ล้างความจำว่าอ่านแชทถึงไหน – รอบหน้าดึงย้อน 3 วันใหม่ (ข้อความซ้ำจะไม่ถูกบันทึกซ้ำ)">ล้างความจำแชท (ดึงย้อน 3 วันใหม่)</button>
+</div>
+<div class="card">
+  <h3>🟢 งานเบื้องหลัง (POS · สิ่งที่ต้องเปิด / ทำ)</h3>
+  <label><input type="checkbox" id="jobs" checked> เปิดหน้าให้เองตามรอบ: หน้าคืนเงิน Shopee (ค้างไว้) · รายรับของฉัน · LnwShop หลังร้าน · การเงิน Lazada</label>
+  <p class="hint">ตัวดึงข้อมูลยังเป็นสคริปต์ Tampermonkey เดิม (ต้องติดตั้งไว้ใน Chrome นี้) · ส่วนเสริมเปิดหน้า → รอจนเสร็จ → ปิดแท็บเอง · ติดรหัสผ่าน/หลุดล็อกอินเกิน 20 นาที จะแจ้งเตือนและปล่อยแท็บไว้ให้จัดการ</p>
+</div>
+<button id="save">บันทึก แล้วลองเลย</button>
+<div id="msg"></div>
 <script src="options.js"></script>
 </body></html>

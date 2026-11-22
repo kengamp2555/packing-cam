@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "💬 Chat Hub Connector",
-  "version": "0.6.0",
-  "description": "รวมแชทลูกค้า Lazada และ Shopee เข้า Chat Hub และส่งข้อความที่ตอบจาก Chat Hub",
+  "name": "🧰 KengAmp ผู้ช่วยร้าน",
+  "version": "0.6.1",
+  "description": "ผู้ช่วยร้าน KengAmp: รับ-ส่งแชท Shopee / Lazada เข้า Chat Hub และเปิดหน้าที่ POS ต้องใช้ให้เองตามรอบ",
   "permissions": [
     "alarms",
     "storage",
@@ -22,7 +22,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Chat Hub Connector",
+    "default_title": "🧰 KengAmp ผู้ช่วยร้าน",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",

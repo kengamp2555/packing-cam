@@ -1,4 +1,5 @@
-/* 💬 Chat Hub Connector · background (Manifest V3)
+/* 🧰 KengAmp ผู้ช่วยร้าน (เดิมชื่อ Chat Hub Connector) · background (Manifest V3)
+ * 2 งาน: 💬 แชท Shopee / Lazada ↔ Chat Hub  ·  🟢 งานเบื้องหลังของ POS (เปิดหน้าตามรอบ)
  * ทุก 1 นาที: ใช้แท็บแชท Lazada / Shopee (ปักหมุดไว้ · เปิดให้เองถ้าไม่มี) อ่านแชทที่มีข้อความใหม่ → ส่ง "ข้อมูลดิบ" เข้า Chat Hub
  * การแปลงข้อความ (การ์ดสินค้า รูป ป้าย AI ฯลฯ) ทำที่ Chat Hub (Parse.gs) → แก้วิธีแสดงผลได้โดยไม่ต้องอัปเดตส่วนเสริม
  * ส่งข้อความเฉพาะที่ผู้ใช้พิมพ์ตอบใน Chat Hub (คิว Outbox) · นอกนั้นอ่านอย่างเดียว
@@ -100,7 +101,7 @@ async function checkUpdate(force) {
     const upd = j && j.version && newer(j.version, VER) ? { version: j.version, zip: j.zip, notes: j.notes || '' } : null;
     const prev = await store.get('update');
     await store.set('update', upd);
-    if (upd && (!prev || prev.version !== upd.version)) chrome.notifications.create('upd', { type: 'basic', iconUrl: 'icon128.png', title: '🔔 Chat Hub Connector มีเวอร์ชันใหม่ ' + upd.version, message: (upd.notes || '') + ' · กดไอคอนส่วนเสริม → ดาวน์โหลด', priority: 1 });
+    if (upd && (!prev || prev.version !== upd.version)) chrome.notifications.create('upd', { type: 'basic', iconUrl: 'icon128.png', title: '🔔 KengAmp ผู้ช่วยร้าน มีเวอร์ชันใหม่ ' + upd.version, message: (upd.notes || '') + ' · กดไอคอนส่วนเสริม → ดาวน์โหลด', priority: 1 });
     return upd;
   } catch (e) { return store.get('update'); }
 }
