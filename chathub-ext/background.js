@@ -330,12 +330,34 @@ async function spSendInPage(convId, text, image) {
         const M = await r.json(); const m = (M || []).find(x => x.type === 'image' && String(x.from_shop_id) === String((ses.shop || {}).id)); return m ? String(m.id) : '';
       } catch (e) { return ''; }
     };
+    // ถาดรูปที่รอส่ง (รูปที่เลือกไว้แต่ยังไม่กดส่ง) = รูป <img> ในกล่องพิมพ์ · มีของค้างอยู่ → ไม่ยุ่ง
+    const trayImgs = () => [...box.querySelectorAll('img')].filter(x => x.offsetParent && x.getBoundingClientRect().width > 40);
+    if (trayImgs().length) return { error: 'มีรูปที่เลือกค้างไว้ในหน้า Shopee (ยังไม่ได้กดส่ง) – ส่งหรือลบรูปนั้นในหน้า Shopee ก่อน แล้วกดส่งใหม่' };
+    const ta0 = box.querySelector('textarea');
+    if (ta0 && ta0.value.trim()) return { error: 'มีข้อความพิมพ์ค้างอยู่ในช่องพิมพ์ของหน้า Shopee – ไม่ได้ส่ง (กันทับข้อความที่พิมพ์ไว้)' };
     const before = await lastImg();
     const bin = atob(image.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
     const dt = new DataTransfer(); dt.items.add(new File([u8], image.name || 'image.jpg', { type: image.mime || 'image/jpeg' }));
     inp.files = dt.files; inp.dispatchEvent(new Event('change', { bubbles: true }));
-    for (let i = 0; i < 25; i++) { await sleep(1000); const now = await lastImg(); if (now && now !== before) return { ok: true }; }
-    return { error: 'ใส่รูปแล้วแต่ไม่เห็นรูปขึ้นในแชทภายใน 25 วินาที – ตรวจในหน้า Shopee ก่อนส่งใหม่ (อาจมีหน้าต่างให้กดยืนยัน)' };
+    // Shopee ใส่รูปลงถาดก่อน แล้วต้องกดส่ง (เหมือนคนกด Enter / ลูกศรส่ง)
+    for (let i = 0; i < 20 && !trayImgs().length; i++) await sleep(500);
+    if (!trayImgs().length) return { error: 'หน้า Shopee ไม่รับรูป (ไม่ขึ้นในถาดรูป) – ลองส่งในหน้า Shopee แทน' };
+    await sleep(800);
+    const ta = box.querySelector('textarea');
+    const pressEnter = () => ta && ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    const clickSend = () => {   // ปุ่มลูกศรส่ง = ปุ่มที่กดได้ซึ่งอยู่ขวาล่างสุดของกล่องพิมพ์
+      const cs = [...box.querySelectorAll('*')].filter(e => { const k = Object.keys(e).find(x => x.startsWith('__reactProps')); return k && e[k].onClick && e.offsetParent; });
+      const r0 = box.getBoundingClientRect();
+      const btn = cs.map(e => ({ e, r: e.getBoundingClientRect() })).filter(o => o.r.width > 0 && o.r.bottom > r0.bottom - 80 && o.r.right > r0.right - 90).sort((a, b) => (b.r.right + b.r.bottom) - (a.r.right + a.r.bottom))[0];
+      if (btn) btn.e.click(); return !!btn;
+    };
+    pressEnter();
+    for (let i = 0; i < 30; i++) {
+      await sleep(1000);
+      const now = await lastImg(); if (now && now !== before) return { ok: true };
+      if (i === 4 && trayImgs().length) clickSend();   // Enter ไม่ส่ง → กดลูกศรส่ง
+    }
+    return { error: 'ใส่รูปแล้วแต่ไม่เห็นรูปขึ้นในแชทภายใน 30 วินาที – ดูในหน้า Shopee: ถ้ารูปยังค้างในถาด กดส่งหรือลบรูปนั้น (ระวังส่งซ้ำ)' };
   }
   let ta = null;
   for (let i = 0; i < 20 && !(ta = document.querySelector('[data-cy="webchat-conversation-detail-input"] textarea')); i++) await sleep(300);

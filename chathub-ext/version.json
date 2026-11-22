@@ -1,5 +1,5 @@
 {
-  "version": "0.6.1",
+  "version": "0.6.2",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "เปลี่ยนชื่อเป็น \"KengAmp ผู้ช่วยร้าน\" · แยกหมวด แชท / งานเบื้องหลัง"
+  "notes": "แก้ส่งรูป Shopee: รูปค้างในถาด ไม่ถูกกดส่ง"
 }
