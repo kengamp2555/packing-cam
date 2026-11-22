@@ -20,5 +20,14 @@ chrome.runtime.sendMessage({ cmd: 'checkUpdate' }).then(u => {
     '<a class="dl" target="_blank" href="' + esc(u.zip) + '">⬇ ดาวน์โหลด</a>';
 });
 $('now').onclick = async () => { $('now').disabled = true; $('now').textContent = '⏳ กำลังดึง…'; const st = await chrome.runtime.sendMessage({ cmd: 'pollNow' }); const r = await chrome.storage.local.get('hubUrl'); show(st, r.hubUrl); $('now').disabled = false; $('now').textContent = '↻ ดึงแชทตอนนี้'; };
+function showJobs(j, on) {
+  if (on === false) { $('jobs').innerHTML = '<b>งานเบื้องหลัง:</b> ปิดอยู่ (เปิดได้ใน ⚙ ตั้งค่า)'; return; }
+  if (!j) { $('jobs').innerHTML = '<b>งานเบื้องหลัง:</b> ยังไม่เคยทำงาน'; return; }
+  const ic = { ok: '✅', run: '⏳', warn: '⚠️', wait: '🟡', skip: '⚪' };
+  $('jobs').innerHTML = '<b>งานเบื้องหลัง</b> (' + new Date(j.at).toLocaleTimeString('th-TH') + ')' + (j.error ? '<br><span class="err">❌ ' + esc(j.error) + '</span>' : '') +
+    (j.items || []).map(x => '<br>' + (ic[x.state] || '') + ' ' + esc(x.label) + ' <span style="color:#6b7685">· ' + esc(x.note) + '</span>').join('');
+}
+chrome.storage.local.get(['jobsLast', 'jobsOn']).then(r => showJobs(r.jobsLast, r.jobsOn));
+$('jobsNow').onclick = async () => { $('jobsNow').disabled = true; const r = await chrome.runtime.sendMessage({ cmd: 'runJobs' }); showJobs(r, true); $('jobsNow').disabled = false; };
 $('hub').onclick = async () => { const r = await load(); if (r.hubUrl) chrome.tabs.create({ url: r.hubUrl.split('?')[0] }); };
 $('opt').onclick = () => chrome.runtime.openOptionsPage();

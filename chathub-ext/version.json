@@ -1,5 +1,5 @@
 {
-  "version": "0.5.0",
+  "version": "0.6.0",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "ส่งรูปจาก Chat Hub ได้ (Shopee / Lazada) · แก้ส่ง Lazada บางแชท"
+  "notes": "งานเบื้องหลัง: เปิดหน้าใน \"สิ่งที่ต้องเปิด / ทำ\" ของ POS ให้เองตามรอบ"
 }

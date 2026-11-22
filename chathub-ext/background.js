@@ -15,17 +15,79 @@ const store = {
 };
 function ensureAlarm() {
   chrome.alarms.get('poll', a => { if (!a) chrome.alarms.create('poll', { periodInMinutes: 1, delayInMinutes: 0.1 }); });
+  chrome.alarms.get('jobs', a => { if (!a) chrome.alarms.create('jobs', { periodInMinutes: 5, delayInMinutes: 0.5 }); });   // งานเบื้องหลัง (Packing Cam)
   chrome.alarms.get('out', a => { if (!a) chrome.alarms.create('out', { periodInMinutes: 0.5, delayInMinutes: 0.2 }); });   // คิวข้อความตอบจาก Chat Hub
 }
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); chrome.runtime.openOptionsPage(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } if (a.name === 'out') processOutbox(); });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'poll') { pollAll('auto'); checkUpdate(); } if (a.name === 'out') processOutbox(); if (a.name === 'jobs') runJobs(); });
 chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   if (msg && msg.cmd === 'pollNow') { pollAll('manual').then(r => reply(r)); return true; }
+  if (msg && msg.cmd === 'runJobs') { runJobs(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'checkUpdate') { checkUpdate(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'reset') { chrome.storage.local.remove(['lzState', 'spState']).then(() => reply({ ok: true })); return true; }
 });
 chrome.notifications.onClicked.addListener(async () => { const u = await store.get('hubUrl'); if (u) chrome.tabs.create({ url: u.split('?')[0] }); });
+
+/* ---------- งานเบื้องหลัง: แทนการเปิดหน้าเองในกล่อง "สิ่งที่ต้องเปิด / ทำ" ของ POS ----------
+ * รายการ + สถานะมาจาก Packing Cam (ผ่าน Chat Hub) ทุก 5 นาที · งานจริงยังทำโดยสคริปต์ Tampermonkey เดิมในหน้านั้น
+ *  - "เปิดค้างไว้ทั้งวัน" (หน้าคืนเงิน Shopee): เปิดแท็บปักหมุดค้างไว้ให้
+ *  - "งานตามรอบ" ที่ถึงรอบ: เปิดแท็บเบื้องหลัง → รอสคริปต์ทำเสร็จ (สถานะเป็น ✓) → ปิดแท็บเอง
+ *    ไม่เสร็จใน 20 นาที (เช่น Shopee ถามรหัสผ่าน / หลุดล็อกอิน) → แจ้งเตือน ปล่อยแท็บไว้ให้คนจัดการ · ลองใหม่ทุก 3 ชม.
+ *  - งานของร้าน Shopee ทำเฉพาะร้านที่ล็อกอินอยู่ใน Chrome นี้ */
+const JOB_WAIT = 20 * 60e3, JOB_RETRY = 3 * 3600e3, JOB_GIVEUP = 2 * 3600e3;
+let jobsBusy = false;
+async function tabAlive(id) { try { await chrome.tabs.get(id); return true; } catch (e) { return false; } }
+async function keepOpen(url) {
+  const base = url.split('?')[0], u = new URL(base);
+  const tabs = await chrome.tabs.query({ url: u.origin + (u.pathname || '/') + '*' });
+  let t = tabs[0];
+  if (!t) { t = await chrome.tabs.create({ url, active: false, pinned: true }); return 'opened'; }
+  try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
+  if (t.discarded) { await chrome.tabs.reload(t.id); return 'reloaded'; }
+  return 'ok';
+}
+async function runJobs(manual) {
+  if (jobsBusy) return store.get('jobsLast');
+  if (!manual && (await store.get('jobsOn')) === false) return null;
+  const hubUrl = await store.get('hubUrl'); if (!hubUrl) return null;
+  jobsBusy = true;
+  const out = { at: Date.now(), items: [] };
+  try {
+    const j = await hubPost(hubUrl, { cmd: 'jobs', ver: VER });
+    if (!j || !j.ok) throw new Error((j && j.error) || 'Chat Hub ไม่ตอบ');
+    const spUser = String((await store.get('spCh')) || '').replace(/^shopee-/, '').toLowerCase();
+    const st = (await store.get('jobState')) || {}, now = Date.now();
+    for (const t of j.tabs || []) {
+      const shop = (String(t.key).match(/^(?:shopee|income):(.+)$/) || [])[1];
+      if (shop && shop.toLowerCase() !== spUser) { out.items.push({ label: t.label, state: 'skip', note: 'ร้านนี้ไม่ได้ล็อกอินใน Chrome นี้' }); continue; }
+      if (t.group === 'open') { const r = await keepOpen(t.url); out.items.push({ label: t.label, state: t.online ? 'ok' : 'wait', note: r === 'ok' ? (t.online ? 'เปิดอยู่' : 'เปิดอยู่ รอสคริปต์ส่งสถานะ') : 'เพิ่งเปิดแท็บให้' }); continue; }
+      const s = st[t.key] || {};
+      if (t.online) {   // ทำเสร็จแล้ว → ปิดแท็บที่ส่วนเสริมเปิดไว้
+        if (s.tabId && await tabAlive(s.tabId)) { try { await chrome.tabs.remove(s.tabId); } catch (e) { } }
+        st[t.key] = { doneAt: t.at };
+        out.items.push({ label: t.label, state: 'ok', note: 'เสร็จแล้ว' }); continue;
+      }
+      if (s.tabId && await tabAlive(s.tabId)) {
+        if (now - s.openedAt > JOB_WAIT && !s.notified) {
+          s.notified = true;
+          chrome.notifications.create('job' + now, { type: 'basic', iconUrl: 'icon128.png', title: '⚠️ งานยังไม่เสร็จ: ' + t.label, message: 'เปิดแท็บนั้นค้างไว้ 20 นาทีแล้วยังไม่เสร็จ – อาจต้องใส่รหัสผ่าน หรือล็อกอินใหม่ (' + (t.sub || '') + ')', priority: 2 });
+        }
+        if (now - s.openedAt > JOB_GIVEUP) { try { await chrome.tabs.remove(s.tabId); } catch (e) { } delete s.tabId; }
+        st[t.key] = s;
+        out.items.push({ label: t.label, state: s.notified ? 'warn' : 'run', note: s.notified ? 'ยังไม่เสร็จ – เปิดแท็บดู' : 'กำลังทำ' }); continue;
+      }
+      if (s.openedAt && now - s.openedAt < JOB_RETRY) { out.items.push({ label: t.label, state: 'warn', note: 'ยังไม่เสร็จ – ลองใหม่ ' + new Date(s.openedAt + JOB_RETRY).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) }); continue; }
+      const tab = await chrome.tabs.create({ url: t.url, active: false });
+      st[t.key] = { openedAt: now, tabId: tab.id };
+      out.items.push({ label: t.label, state: 'run', note: 'เพิ่งเปิดแท็บให้' });
+    }
+    await store.set('jobState', st);
+  } catch (e) { out.error = String(e && e.message || e); }
+  finally { jobsBusy = false; }
+  await store.set('jobsLast', out);
+  return out;
+}
 
 /* ---------- เช็กเวอร์ชันใหม่ (วันละไม่กี่ครั้ง) ---------- */
 const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
