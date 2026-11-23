@@ -226,9 +226,10 @@ function orderAct(o, a) {
     const pk = o.method === 'pickup', def = o.status === 'packed' ? (pk ? '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว พร้อมให้มารับที่ร้านครับ' + (o.pay === 'store' ? '\nยอดชำระที่ร้าน ฿' + fmt(o.total) : '') : '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว กำลังจัดส่งครับ') : 'ออเดอร์ ' + o.no + ' : ';
     P.innerHTML = '<b>📤 ส่ง LINE หาลูกค้า</b> <span class="mut">(ไม่เปลี่ยนสถานะ)</span><label class="fld"><span>ข้อความ</span><textarea id="pmsg" rows="3">' + esc(def) + '</textarea></label>' +
       (o.packImgs.length ? '<label style="display:block;margin:6px 0"><input type="checkbox" id="rimg" checked> แนบรูปจัดของ (' + o.packImgs.length + ' รูป)</label>' : '') +
+      (o.items.some(l => l.x) ? '<label style="display:block;margin:6px 0"><input type="checkbox" id="rsum" checked> แนบสรุปรายการสินค้า (รายการที่ยกเลิกขีดฆ่า + ยอดรวมใหม่)</label>' : '') +
       '<div class="acts"><button class="btn pri" id="go">📤 ส่ง</button></div><div class="msg" id="pm"></div>';
     $('go').onclick = async () => { const b = $('go'), m = $('pm'); b.disabled = true; m.className = 'msg'; m.textContent = 'กำลังส่ง…';
-      try { const r = await api({ action: 'aResend', no: o.no, msg: $('pmsg').value, imgs: !!($('rimg') && $('rimg').checked) });
+      try { const r = await api({ action: 'aResend', no: o.no, msg: $('pmsg').value, imgs: !!($('rimg') && $('rimg').checked), summary: !!($('rsum') && $('rsum').checked) });
         if (r.ok) { m.className = 'msg'; m.textContent = '✅ ส่งให้ลูกค้าแล้ว'; toast('ส่ง LINE แล้ว'); } else { m.className = 'msg bad'; m.textContent = '⚠️ ส่งไม่สำเร็จ: ' + r.err; }
       } catch (e) { m.className = 'msg bad'; m.textContent = e.message; } b.disabled = false; };
   }
