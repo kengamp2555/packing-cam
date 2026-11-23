@@ -1,9 +1,9 @@
 const $ = id => document.getElementById(id);
-chrome.storage.local.get(['hubUrl', 'lzOn', 'spOn', 'jobsOn', 'jobsSharedOn']).then(r => { $('jobsShared').checked = r.jobsSharedOn !== false; $('url').value = r.hubUrl || ''; $('lz').checked = r.lzOn !== false; $('sp').checked = r.spOn !== false; $('jobs').checked = r.jobsOn !== false; });
+chrome.storage.local.get(['hubUrl', 'lzOn', 'spOn', 'lnOn', 'jobsOn', 'jobsSharedOn']).then(r => { $('ln').checked = r.lnOn !== false; $('jobsShared').checked = r.jobsSharedOn !== false; $('url').value = r.hubUrl || ''; $('lz').checked = r.lzOn !== false; $('sp').checked = r.spOn !== false; $('jobs').checked = r.jobsOn !== false; });
 $('save').onclick = async () => {
   const u = $('url').value.trim();
   if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec\?src=ext&k=\w+$/.test(u)) { $('msg').textContent = '❌ ลิงก์ไม่ถูกต้อง – คัดลอกจาก Chat Hub → ⚙ ตั้งค่า → กล่อง "ส่วนเสริม KengAmp ผู้ช่วยร้าน"'; return; }
-  await chrome.storage.local.set({ hubUrl: u, lzOn: $('lz').checked, spOn: $('sp').checked, jobsOn: $('jobs').checked, jobsSharedOn: $('jobsShared').checked });
+  await chrome.storage.local.set({ hubUrl: u, lzOn: $('lz').checked, spOn: $('sp').checked, lnOn: $('ln').checked, jobsOn: $('jobs').checked, jobsSharedOn: $('jobsShared').checked });
   $('msg').textContent = '⏳ บันทึกแล้ว · กำลังลองดึงแชท (ครั้งแรกอาจใช้ 1–2 นาที)…';
   if ($('jobs').checked) chrome.runtime.sendMessage({ cmd: 'runJobs' });
   const st = await chrome.runtime.sendMessage({ cmd: 'pollNow' });

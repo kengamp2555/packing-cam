@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "🧰 KengAmp ผู้ช่วยร้าน",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "ผู้ช่วยร้าน KengAmp: รับ-ส่งแชท Shopee / Lazada เข้า Chat Hub และเปิดหน้าที่ POS ต้องใช้ให้เองตามรอบ",
   "permissions": [
     "alarms",
@@ -13,6 +13,7 @@
   "host_permissions": [
     "https://sellercenter.lazada.co.th/*",
     "https://seller.shopee.co.th/*",
+    "https://chat.line.biz/*",
     "https://script.google.com/*",
     "https://script.googleusercontent.com/*",
     "https://kengamp2555.github.io/*"

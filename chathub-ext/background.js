@@ -28,7 +28,7 @@ chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   if (msg && msg.cmd === 'catalogNow') { runCatalog(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'runJobs') { runJobs(true).then(r => reply(r)); return true; }
   if (msg && msg.cmd === 'checkUpdate') { checkUpdate(true).then(r => reply(r)); return true; }
-  if (msg && msg.cmd === 'reset') { chrome.storage.local.remove(['lzState', 'spState']).then(() => reply({ ok: true })); return true; }
+  if (msg && msg.cmd === 'reset') { chrome.storage.local.remove(['lzState', 'spState', 'lnState']).then(() => reply({ ok: true })); return true; }
 });
 chrome.notifications.onClicked.addListener(async () => { const u = await store.get('hubUrl'); if (u) chrome.tabs.create({ url: u.split('?')[0] }); });
 
@@ -92,6 +92,79 @@ async function runJobs(manual) {
   finally { jobsBusy = false; }
   await store.set('jobsLast', out);
   return out;
+}
+
+/* ---------- LINE OA (chat.line.biz) · ข้อความที่ร้านตอบในแอป LINE OA (Webhook ไม่ส่งมาให้) + สถานะอ่าน ----------
+ * ข้อความจากลูกค้ายังมาทาง Webhook ตามเดิม · ส่วนเสริมส่งเฉพาะ "ข้อความที่ร้านส่ง" + เวลาที่ลูกค้าอ่าน */
+const LN_CHAT = 'https://chat.line.biz/';
+const LN_CH = { 'C-Store': 'line-cstore', 'KengAmp': 'line-kengamp' };   // ชื่อบัญชี LINE OA → ช่องทางใน Chat Hub
+async function lineTab() {
+  const tabs = await chrome.tabs.query({ url: 'https://chat.line.biz/*' });
+  let t = tabs[0];
+  if (!t) { t = await chrome.tabs.create({ url: LN_CHAT, active: false, pinned: true }); await waitComplete(t.id); }
+  try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
+  if (t.discarded) { await chrome.tabs.reload(t.id); await waitComplete(t.id); }
+  return t;
+}
+async function pollLineOA(hubUrl) {
+  const state = (await store.get('lnState')) || {};
+  const tab = await lineTab();
+  const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: lnPollInPage, args: [state, LN_CH] });
+  const r = res && res.result;
+  if (!r) return { error: 'อ่านหน้า LINE OA ไม่ได้' };
+  if (r.error) {
+    if (r.error === 'login') await notifyOnce('lnlogin', 'LINE OA Manager ออกจากระบบแล้ว', 'เปิดแท็บ chat.line.biz ที่ปักหมุดไว้ แล้วล็อกอินใหม่');
+    return { error: r.error === 'login' ? 'ต้องล็อกอิน LINE OA (chat.line.biz) ใหม่' : r.error };
+  }
+  let n = 0;
+  for (const b of r.bots) { await sendHub(hubUrl, b.ch, 'lineoa', {}, b.items, b.threads); n += b.items.length; }
+  await store.set('lnState', r.state);
+  return { bots: r.bots.map(b => b.name).join(', '), items: n };
+}
+/* รันในหน้า chat.line.biz (world: MAIN) · ใช้ session ของหน้าเว็บเอง · อ่านอย่างเดียว */
+async function lnPollInPage(state, map) {
+  const get = async u => { const r = await fetch(u, { credentials: 'include' }); if (r.status === 401 || r.status === 403) throw new Error('login'); if (!r.ok) throw new Error('LINE OA ตอบ ' + r.status); return r.json(); };
+  const shrink = async (url) => {   // รูปที่ร้านส่ง → ย่อเหลือด้านยาว 1280px (JPEG) ส่งให้ Chat Hub เก็บลง Drive
+    try {
+      const b = await (await fetch(url, { credentials: 'include' })).blob();
+      const bm = await createImageBitmap(b), k = Math.min(1, 1280 / Math.max(bm.width, bm.height));
+      const c = document.createElement('canvas'); c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bm, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+    } catch (e) { return ''; }
+  };
+  let bots;
+  try { bots = (await get('/api/v1/bots')).list || []; } catch (e) { return { error: e.message === 'login' ? 'login' : e.message }; }
+  const out = [], st = Object.assign({}, state), first = !Object.keys(state).length, since = Date.now() - 3 * 864e5;
+  for (const b of bots) {
+    const ch = map[b.name]; if (!ch) continue;
+    const seen = Object.assign({}, st[b.botId] || {}), items = [], threads = [];
+    let chats = [];
+    try { chats = (await get('/api/v2/bots/' + b.botId + '/chats?folderType=ALL&limit=30')).list || []; } catch (e) { if (e.message === 'login') return { error: 'login' }; continue; }
+    for (const c of chats) {
+      if (c.chatType && c.chatType !== 'USER') continue;
+      threads.push({ uid: c.chatId, raw: { userLastReadAt: c.userLastReadAt || 0, lastSentAt: c.lastSentAt || 0 } });
+      const last = Number(c.lastSentAt || 0), prev = Number(seen[c.chatId] || (first ? since : since));
+      if (!last || last <= prev) continue;
+      try {
+        const m = await get('/api/v3/bots/' + b.botId + '/chats/' + c.chatId + '/messages?limit=30');
+        for (const ev of m.list || []) {
+          if (ev.type !== 'messageSent' || !ev.message || !ev.message.id || ev.timestamp <= prev) continue;
+          const raw = { type: ev.type, timestamp: ev.timestamp, message: Object.assign({}, ev.message) };
+          delete raw.message.quoteToken;
+          if (raw.message.type === 'image' && raw.message.contentHash) raw._b64 = await shrink('https://chat-content.line.biz/bot/' + b.botId + '/' + raw.message.contentHash);
+          delete raw.message.contentProvider;
+          items.push({ uid: c.chatId, name: (c.profile || {}).name || '', pic: (c.profile || {}).iconHash ? 'https://profile.line-scdn.net/' + c.profile.iconHash + '/preview' : '', at: ev.timestamp, msgId: String(ev.message.id), raw });
+        }
+        seen[c.chatId] = last;
+      } catch (e) { if (e.message === 'login') return { error: 'login' }; }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    st[b.botId] = seen;
+    items.sort((a, z) => a.at - z.at);
+    out.push({ name: b.name, ch, items, threads });
+  }
+  return { bots: out, state: st };
 }
 
 /* ---------- 📦 รายการสินค้า (ให้กล่องค้นหาสินค้าใน Chat Hub) ----------
@@ -235,6 +308,7 @@ async function pollAll(why) {
     if (!url) throw new Error('ยังไม่ได้ตั้งลิงก์ Chat Hub (กดไอคอน → ตั้งค่า)');
     if ((await store.get('lzOn')) !== false) { try { st.lazada = await pollLazada(url); } catch (e) { st.lazada = { error: String(e && e.message || e) }; } }
     if ((await store.get('spOn')) !== false) { try { st.shopee = await pollShopee(url); } catch (e) { st.shopee = { error: String(e && e.message || e) }; } }
+    if ((await store.get('lnOn')) !== false) { try { st.line = await pollLineOA(url); } catch (e) { st.line = { error: String(e && e.message || e) }; } }
     st.ok = true;
   } catch (e) { st.ok = false; st.error = String(e && e.message || e); }
   finally { busy = false; if (outboxAgain) setTimeout(processOutbox, 0); }
