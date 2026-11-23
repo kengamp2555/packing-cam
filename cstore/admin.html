@@ -194,7 +194,8 @@ function orderAct(o, a) {
   if (a === 'paid') { P.innerHTML = '<b>💰 ยืนยันรับเงิน ฿' + fmt(o.total) + '</b>' + notify + '<div class="acts"><button class="btn ok" id="go">ยืนยัน</button></div><div class="msg" id="pm"></div>';
     $('go').onclick = () => doStatus(o, { status: 'paid', notify: $('nt').checked }, true); }
   if (a === 'pack') {
-    const pk = o.method === 'pickup', msg = pk ? '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว พร้อมให้มารับที่ร้านครับ' + (o.pay === 'store' ? '\nยอดชำระที่ร้าน ฿' + fmt(o.total) : '') : '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว กำลังจัดส่งครับ';
+    const pkm = (STORE.pickup || {}).map || ((STORE.pickup || {}).addr ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(STORE.pickup.addr) : '');
+    const pk = o.method === 'pickup', msg = pk ? '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว พร้อมให้มารับที่ร้านครับ' + (o.pay === 'store' ? '\nยอดชำระที่ร้าน ฿' + fmt(o.total) : '') + ((STORE.pickup || {}).hours ? '\n🕘 ' + STORE.pickup.hours : '') + (pkm ? '\n📍 แผนที่ร้าน: ' + pkm : '') : '📦 ออเดอร์ ' + o.no + ' จัดของเสร็จแล้ว กำลังจัดส่งครับ';
     P.innerHTML = '<b>📦 จัดของเสร็จ</b><label class="fld"><span>ถ่าย/เลือกรูปของที่จัดแล้ว (สูงสุด 4 รูป)</span><input type="file" id="pimg" accept="image/*" capture="environment" multiple></label><div class="imgs" id="pprev"></div>' +
       '<label class="fld"><span>ข้อความถึงลูกค้า</span><textarea id="pmsg" rows="3">' + esc(msg) + '</textarea></label>' + notify + '<div class="acts"><button class="btn pri" id="go">📤 บันทึก + ส่งให้ลูกค้า</button></div><div class="msg" id="pm"></div>';
     let imgs = [];
@@ -348,7 +349,7 @@ function renderDesign() {
     '<label class="fld" style="margin-left:auto"><span>สีหลัก</span><input type="color" data-k="color" value="' + esc(D.color || '#1f6feb') + '"></label></div>' +
     t('announce', 'แถบประกาศ (ว่าง = ไม่แสดง)', 'เช่น 🎉 ส่งฟรีเมื่อซื้อครบ 500 บาท') + '</div>' +
     '<div class="card"><h2>🖼 แบนเนอร์ (อัตราส่วน 2.4:1)</h2><div id="bans"></div><button class="btn" id="banAdd">➕ เพิ่มแบนเนอร์</button><div class="mut">ลิงก์: ว่าง = ไม่มีลิงก์ · <code>cat:ชื่อหมวด</code> = เปิดหมวด · <code>sku:รหัส</code> = เปิดสินค้า · https://… = เว็บอื่น</div></div>' +
-    '<div class="card"><h2>🏪 รับที่ร้าน / 🚚 จัดส่ง</h2>' + f('pickup.addr', 'ที่อยู่ร้าน') + '<div class="g2">' + f('pickup.hours', 'เวลาเปิด', 'จ-ส 8:30–17:30') + f('pickup.phone', 'เบอร์ร้าน') + '</div>' + f('pickup.map', 'ลิงก์ Google Maps') +
+    '<div class="card"><h2>🏪 รับที่ร้าน / 🚚 จัดส่ง</h2>' + f('pickup.addr', 'ที่อยู่ร้าน') + '<div class="g2">' + f('pickup.hours', 'เวลาเปิด', 'จ-ส 8:30–17:30') + f('pickup.phone', 'เบอร์ร้าน') + '</div>' + f('pickup.map', 'ลิงก์ Google Maps (ลูกค้าเห็นแผนที่ตอนเลือกรับที่ร้าน · เปิด Google Maps → ร้าน → แชร์ → คัดลอกลิงก์)') +
     '<div class="g2">' + f('ship.fee', 'ค่าส่งเหมา (บาท)', '50', 'number') + f('ship.free', 'ซื้อครบเท่านี้ ส่งฟรี (0 = ไม่มี)', '0', 'number') + '</div>' + f('ship.note', 'หมายเหตุการจัดส่ง', 'เช่น ส่ง Flash ทุกวัน 15:00') + '</div>' +
     '<div class="card"><h2>💳 ชำระเงิน</h2>' + cb('pay.qr', '📱 โอนพร้อมเพย์ + แนบสลิป') + cb('pay.store', '💵 จ่ายที่ร้าน (เฉพาะรับที่ร้าน)') + '<div class="g2">' + f('ppId', 'พร้อมเพย์ (เบอร์ 10 หลัก / เลข 13 หลัก)') + f('ppName', 'ชื่อบัญชี (แสดงใต้ QR)') + '</div>' + t('checkoutNote', 'ข้อความในหน้ายืนยันสั่งซื้อ') + '</div>' +
     '<div class="card"><h2>📦 การแสดงสินค้า</h2>' + cb('defaultShow', 'สินค้าใหม่/ที่ยังไม่ได้ตั้ง = แสดงในร้าน (ปิด = ต้องกดเปิดทีละตัวในแท็บสินค้า)') + cb('hideZero', 'ซ่อนสินค้าที่สต็อก BN = 0') +

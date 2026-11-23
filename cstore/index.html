@@ -95,6 +95,9 @@ img{display:block}
 .sum div{display:flex;justify-content:space-between;padding:2px 0}
 .sum .tot{font-size:18px;font-weight:800;color:var(--c);border-top:1px dashed var(--line);margin-top:4px;padding-top:6px}
 .note{font-size:12.5px;color:var(--mut);margin:6px 0}
+.pick{background:#f4f8ff;border:1px solid #d6e4ff;border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13.5px;line-height:1.6}
+.pick .pmap{width:100%;height:200px;border:0;border-radius:10px;margin-top:8px;display:block}
+.pick .pbtn{display:block;text-align:center;margin-top:8px;padding:9px;border-radius:10px;background:#1f6feb;color:#fff;font-weight:700;text-decoration:none}
 .err{color:var(--bad);font-weight:700;font-size:13.5px;margin:8px 0}
 .qr{background:#fff;border:2px solid var(--c);border-radius:14px;padding:12px;text-align:center;margin:10px 0}
 .qr svg{width:220px;max-width:100%;height:auto;margin:6px auto}
@@ -197,6 +200,22 @@ let banT = null;
 function bannerAuto() { clearInterval(banT); banT = setInterval(() => { const b = $('banners'); if (!b.children.length || b.matches(':hover')) return; const w = b.children[0].offsetWidth + 10; const nx = b.scrollLeft + w >= b.scrollWidth - 5 ? 0 : b.scrollLeft + w; b.scrollTo({ left: nx, behavior: 'smooth' }); }, 4500); }
 $('banners').addEventListener('click', e => { const a = e.target.closest('a'); if (!a) return; const l = a.dataset.bl;
   if (/^cat:/.test(l)) { e.preventDefault(); F.c1 = l.slice(4); F.c2 = ''; renderCats(); renderList(true); } else if (/^sku:/.test(l)) { e.preventDefault(); openItem(l.slice(4)); } else if (!/^https?:/.test(l)) e.preventDefault(); });
+/* 📍 กล่องข้อมูลรับที่ร้าน: ที่อยู่ · เวลาเปิด · เบอร์ · แผนที่ (ฝังในหน้า + ปุ่มเปิดนำทาง) */
+function mapLink() { const p = ST.pickup || {}; return p.map || (p.addr ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.addr) : ''); }
+function mapEmbed() {
+  const p = ST.pickup || {}, m = String(p.map || '');
+  const ll = /@(-?\d+\.\d+),(-?\d+\.\d+)/.exec(m) || /[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/.exec(m);
+  const q = ll ? ll[1] + ',' + ll[2] : p.addr || '';
+  return q ? 'https://maps.google.com/maps?q=' + encodeURIComponent(q) + '&z=16&output=embed' : '';
+}
+function pickupBox() {
+  const p = ST.pickup || {}, link = mapLink(), emb = mapEmbed();
+  if (!p.addr && !link && !p.hours && !p.phone) return '';
+  return '<div class="pick">' + (p.addr ? '<div>📍 ' + esc(p.addr) + '</div>' : '') + (p.hours ? '<div>🕘 ' + esc(p.hours) + '</div>' : '') +
+    (p.phone ? '<div>📞 <a href="tel:' + esc(p.phone) + '">' + esc(p.phone) + '</a></div>' : '') +
+    (emb ? '<iframe class="pmap" src="' + esc(emb) + '" loading="lazy" referrerpolicy="no-referrer-when-downgrade" title="แผนที่ร้าน"></iframe>' : '') +
+    (link ? '<a class="pbtn" href="' + esc(link) + '" target="_blank" rel="noopener">🗺 เปิดแผนที่ / นำทางไปร้าน</a>' : '') + '</div>';
+}
 function renderFoot() {
   const p = ST.pickup || {}, s = ST.ship || {};
   $('foot').innerHTML = '<b>🏪 ' + esc(ST.name || '') + '</b>' + (p.addr ? '<div>📍 ' + esc(p.addr) + (p.map ? ' · <a href="' + esc(p.map) + '" target="_blank">แผนที่</a>' : '') + '</div>' : '') +
@@ -298,7 +317,7 @@ function renderCart() {
   $('sbox').innerHTML = '<div class="sh-h"><h3>🛒 ตะกร้า (' + cartCount() + ' ชิ้น)</h3><button class="x">✕</button></div>' +
     L.map(sk => { const it = BY[sk]; return '<div class="ln">' + (it.i ? '<img src="' + esc(imgUrl(it.i)) + '" alt="">' : '<div class="ini2">' + esc(it.s.slice(0, 2)) + '</div>') + '<div class="m">' + esc(it.n) + '<br><small>' + esc(it.s) + ' · ฿' + fmt(it.p) + '</small><br><b>฿' + fmt(it.p * cart[sk]) + '</b></div>' + ctrl(it) + '</div>'; }).join('') +
     '<div style="font-weight:700;margin-top:12px">รับสินค้า</div><div class="seg"><label><input type="radio" name="mt" value="pickup"' + (form.method === 'pickup' ? ' checked' : '') + '>🏪 รับที่ร้าน</label><label><input type="radio" name="mt" value="ship"' + (form.method === 'ship' ? ' checked' : '') + '>🚚 จัดส่ง ' + (sf || form.method !== 'ship' ? '' : '(ฟรี)') + '</label></div>' +
-    (form.method === 'pickup' && p.addr ? '<div class="note">📍 ' + esc(p.addr) + (p.hours ? ' · ' + esc(p.hours) : '') + '</div>' : '') +
+    (form.method === 'pickup' ? pickupBox() : '') +
     (form.method === 'ship' ? '<div class="note">ค่าส่ง ' + fmt(+s.fee || 0) + ' บาท' + (+s.free > 0 ? ' · ครบ ' + fmt(+s.free) + ' บาท ส่งฟรี' + (sub < +s.free ? ' (อีก ' + fmt(+s.free - sub) + ' บาท)' : ' ✅') : '') + (s.note ? ' · ' + esc(s.note) : '') + '</div>' : '') +
     '<div style="font-weight:700;margin-top:10px">ชำระเงิน</div><div class="seg"><label class="' + (canQr ? '' : 'dis') + '"><input type="radio" name="py" value="qr"' + (form.pay === 'qr' ? ' checked' : '') + '>📱 โอนพร้อมเพย์</label><label class="' + (canStore ? '' : 'dis') + '"><input type="radio" name="py" value="store"' + (form.pay === 'store' ? ' checked' : '') + '>💵 จ่ายที่ร้าน</label></div>' +
     '<label class="fld"><span>ชื่อผู้สั่ง</span><input id="fName" value="' + esc(form.name) + '" autocomplete="name"></label>' +
@@ -372,7 +391,7 @@ async function openOrders() {
     if (sheetMode !== 'orders') return;
     $('sbox').innerHTML = '<div class="sh-h"><h3>🧾 คำสั่งซื้อของฉัน</h3><button class="x">✕</button></div>' + (r.orders.length ? r.orders.map(o =>
       '<div class="ocard"><div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(o.no) + '</b><span class="st ' + esc(o.status) + '">' + esc(o.statusTh) + '</span></div>' +
-      '<div class="note">' + esc(o.created.slice(0, 16)) + ' · ' + (o.method === 'ship' ? '🚚 จัดส่ง' : '🏪 รับที่ร้าน') + ' · ' + (o.pay === 'qr' ? 'โอน' : 'จ่ายที่ร้าน') + '</div>' +
+      '<div class="note">' + esc(o.created.slice(0, 16)) + ' · ' + (o.method === 'ship' ? '🚚 จัดส่ง' : '🏪 รับที่ร้าน' + (mapLink() && ['cancel', 'done'].indexOf(o.status) < 0 ? ' · <a href="' + esc(mapLink()) + '" target="_blank" rel="noopener">🗺 แผนที่ร้าน</a>' : '')) + ' · ' + (o.pay === 'qr' ? 'โอน' : 'จ่ายที่ร้าน') + '</div>' +
       o.items.map(l => l.x ? '<div style="opacity:.6">• <s>' + esc(l.n) + ' ×' + l.q + '</s> <span class="note">ยกเลิก</span></div>' : '<div>• ' + esc(l.n) + ' ×' + l.q + ' <span class="note">฿' + fmt(l.t) + '</span></div>').join('') + '<div style="font-weight:800;margin-top:4px">รวม ฿' + fmt(o.total) + '</div>' +
       (o.track ? '<div>📦 เลขพัสดุ: <b>' + esc(o.track) + '</b></div>' : '') + (o.cancel ? '<div class="err">เหตุผลยกเลิก: ' + esc(o.cancel) + '</div>' : '') +
       (o.packImgs.length ? '<div class="imgs">' + o.packImgs.map(u => '<img src="' + esc(u) + '=w400" alt="" onclick="window.open(\'' + esc(u) + '\')">').join('') + '</div>' : '') +
