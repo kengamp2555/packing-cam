@@ -289,13 +289,23 @@ async function processOutbox() {
     const j = await hubPost(hubUrl, { cmd: 'outbox', chs, ver: VER });
     for (const it of (j && j.items) || []) {
       let res;
+      let uid = it.uid;
       try {
-        if (it.ch === LZ_CH) { const tab = await lazadaTab(); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: lzSendInPage, args: [it.uid, it.text, it.image || null] }))[0].result; }
-        else { const tab = await shopeeTab(true); res = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: spSendInPage, args: [it.uid, it.text, it.image || null] }))[0].result; }
+        const run = async (tab, func, args) => (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func, args }))[0].result;
+        const om = /^order:([\w-]+):(\d*)$/.exec(uid);   // ข้อความตามคำสั่งซื้อ (เช่น แจ้งออกใบกำกับ) → หาห้องแชทของผู้ซื้อก่อน
+        if (it.ch === LZ_CH) {
+          const tab = await lazadaTab();
+          if (om) { const f = await run(tab, lzResolveBuyer, [om[2]]); if (!f || f.error) throw new Error((f && f.error) || 'หาห้องแชทไม่ได้'); uid = f.uid; }
+          res = await run(tab, lzSendInPage, [uid, it.text, it.image || null]);
+        } else {
+          const tab = await shopeeTab(true);
+          if (om) { const f = await run(tab, spResolveOrder, [om[1]]); if (!f || f.error) throw new Error((f && f.error) || 'หาห้องแชทไม่ได้'); uid = f.uid; }
+          res = await run(tab, spSendInPage, [uid, it.text, it.image || null]);
+        }
       } catch (e) { res = { error: String(e && e.message || e) }; }
       res = res || { error: 'ไม่มีผลตอบกลับจากหน้าเว็บ' };
       if (res.ok) sent++;
-      await hubPost(hubUrl, { cmd: 'outboxDone', id: it.id, ok: !!res.ok, error: res.error || '' });
+      await hubPost(hubUrl, { cmd: 'outboxDone', id: it.id, ok: !!res.ok, error: res.error || '', uid });
     }
   } catch (e) { console.warn('outbox', e); }
   finally { busy = false; if (outboxAgain) setTimeout(processOutbox, 0); }
@@ -537,6 +547,37 @@ async function spSendInPage(convId, text, image) {
   for (let i = 0; i < 25 && ta.value; i++) await sleep(300);
   if (ta.value) { set.call(ta, ''); ta.dispatchEvent(new Event('input', { bubbles: true })); return { error: 'หน้า Shopee ไม่ยอมส่ง (อาจมีหน้าต่างเตือนขึ้น) – ตอบในหน้า Shopee แทน' }; }
   return { ok: true };
+}
+/* รันในหน้า Shopee: เลขคำสั่งซื้อ → ผู้ซื้อ → ห้องแชทที่ลูกค้าเคยทักมา (อ่านอย่างเดียว) */
+async function spResolveOrder(orderSn) {
+  const ck = Object.fromEntries(document.cookie.split('; ').map(c => { const i = c.indexOf('='); return [c.slice(0, i), c.slice(i + 1)]; }));
+  const q = 'SPC_CDS=' + encodeURIComponent(ck.SPC_CDS || '') + '&SPC_CDS_VER=2';
+  const h = await (await fetch('/api/v3/order/get_order_list_search_bar_hint?keyword=' + encodeURIComponent(orderSn) + '&category=1&order_list_tab=100&list_type=all&' + q, { credentials: 'include' })).json();
+  const hit = ((((h || {}).data || {}).order_sn_result || {}).list || []).find(x => String(x.order_sn).toUpperCase() === String(orderSn).toUpperCase());
+  if (!hit) return { error: 'ไม่พบคำสั่งซื้อ ' + orderSn + ' ในร้าน Shopee ที่ล็อกอินอยู่' };
+  const o = await (await fetch('/api/v3/order/get_one_order?order_id=' + hit.order_id + '&' + q, { credentials: 'include' })).json();
+  const buyer = ((o || {}).data || {}).buyer_user || {};
+  const ses = JSON.parse(localStorage.getItem('chat-session') || 'null'); if (!ses || !ses.token) return { error: 'ต้องล็อกอิน Shopee ใหม่' };
+  const tail = '_uid=' + ses.user.uid + '&_v=9.1.17&csrf_token=&SPC_CDS_CHAT=' + (ck.SPC_CDS_CHAT || '') + '&x-shop-region=TH&_api_source=webchat';
+  const convs = await (await fetch('/webchat/api/v1.2/conversations?direction=older&type=all&limit=30&biz_id=0&' + tail, { credentials: 'include', headers: { Authorization: 'Bearer ' + ses.token } })).json();
+  const c = (convs || []).find(x => (buyer.user_id && String(x.to_id) === String(buyer.user_id)) || (hit.buyer_name && x.to_name === hit.buyer_name));
+  if (!c) return { error: 'ไม่พบห้องแชทของผู้ซื้อ ' + (hit.buyer_name || '') + ' ในแชทล่าสุด 30 ห้อง – แจ้งลูกค้าในแชทเอง' };
+  return { uid: String(c.id) };
+}
+/* รันในหน้า Lazada: รหัสผู้ซื้อ → ห้องแชท (อ่านอย่างเดียว) */
+async function lzResolveBuyer(buyerId) {
+  for (let i = 0; i < 30 && !(window.lib && window.lib.mtop); i++) await new Promise(r => setTimeout(r, 500));
+  if (!(window.lib && window.lib.mtop)) return { error: 'หน้า Lazada ยังโหลดไม่เสร็จ หรือออกจากระบบแล้ว' };
+  const base = { accessKey: 'lazada-pc-h5', accessToken: 'lazada-test-secret', accountType: 2, nodeId: 1 }, api = 'mtop.im.use.web.seller.messagebox.querySessionList';
+  for (let page = 1; page <= 3; page++) {
+    let r; try { r = await window.lib.mtop.request({ v: '1.0', appKey: '4272', timeout: 30000, H5Request: true, type: 'GET', method: 'GET', api, url: api, dataType: 'json', valueType: 'original', 'x-i18n-regionID': 'LAZADA_TH', data: Object.assign({ startTime: String(Date.now()), fetchCount: 30, pageNum: page }, base) }); }
+    catch (e) { return { error: 'Lazada ตอบผิดพลาด' }; }
+    const L = (r.data && r.data.sessionViewDTOList) || [];
+    const hit = L.find(sv => { const p = String(sv.sessionId).split('#'); return (p[3] === '1' && p[2] === String(buyerId)) || (p[5] === '1' && p[4] === String(buyerId)); });
+    if (hit) return { uid: String(hit.sessionId) };
+    if (L.length < 30) break;
+  }
+  return { error: 'ไม่พบห้องแชทของผู้ซื้อนี้ใน Lazada (ลูกค้ายังไม่เคยทัก หรือแชทเก่าเกินไป) – แจ้งลูกค้าในแชทเอง' };
 }
 /* รันในหน้า Lazada (world: MAIN) · ส่งด้วยคำสั่งเดียวกับปุ่มส่งของหน้าแชท Lazada (lib.mtop ของหน้าเว็บเอง) */
 async function lzSendInPage(sessionId, text, image) {
