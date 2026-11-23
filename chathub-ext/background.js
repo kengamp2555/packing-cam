@@ -117,7 +117,7 @@ async function pollLineOA(hubUrl) {
     return { error: r.error === 'login' ? 'ต้องล็อกอิน LINE OA (chat.line.biz) ใหม่' : r.error };
   }
   let n = 0;
-  for (const b of r.bots) { await sendHub(hubUrl, b.ch, 'lineoa', {}, b.items, b.threads); n += b.items.length; }
+  for (const b of r.bots) { await sendHub(hubUrl, b.ch, 'lineoa', {}, b.items, b.threads, { links: b.links }); n += b.items.length; }
   await store.set('lnState', r.state);
   return { bots: r.bots.map(b => b.name).join(', '), items: n };
 }
@@ -138,17 +138,19 @@ async function lnPollInPage(state, map) {
   const out = [], st = Object.assign({}, state), first = !Object.keys(state).length, since = Date.now() - 3 * 864e5;
   for (const b of bots) {
     const ch = map[b.name]; if (!ch) continue;
-    const seen = Object.assign({}, st[b.botId] || {}), items = [], threads = [];
+    const seen = Object.assign({}, st[b.botId] || {}), items = [], threads = [], links = {};   // links: รหัสแชทของ LINE OA ≠ รหัสลูกค้าใน Webhook → ส่งชื่อ + รหัสข้อความลูกค้าให้ Chat Hub จับคู่
     let chats = [];
     try { chats = (await get('/api/v2/bots/' + b.botId + '/chats?folderType=ALL&limit=25')).list || []; }   // สูงสุด 25 ต่อครั้ง
     catch (e) { if (e.message === 'login') return { error: 'login' }; return { error: b.name + ': ' + e.message }; }
     for (const c of chats) {
       if (c.chatType && c.chatType !== 'USER') continue;
       threads.push({ uid: c.chatId, raw: { userLastReadAt: c.userLastReadAt || 0, lastSentAt: c.lastSentAt || 0 } });
+      links[c.chatId] = { name: (c.profile || {}).name || '', hint: [] };
       const last = Number(c.lastSentAt || 0), prev = Number(seen[c.chatId] || (first ? since : since));
       if (!last || last <= prev) continue;
       try {
         const m = await get('/api/v3/bots/' + b.botId + '/chats/' + c.chatId + '/messages?limit=30');
+        links[c.chatId].hint = (m.list || []).filter(ev => ev.type === 'message' && ev.message && ev.message.id).slice(0, 10).map(ev => String(ev.message.id));
         for (const ev of m.list || []) {
           if (ev.type !== 'messageSent' || !ev.message || !ev.message.id || ev.timestamp <= prev) continue;
           const raw = { type: ev.type, timestamp: ev.timestamp, message: Object.assign({}, ev.message) };
@@ -163,7 +165,7 @@ async function lnPollInPage(state, map) {
     }
     st[b.botId] = seen;
     items.sort((a, z) => a.at - z.at);
-    out.push({ name: b.name, ch, items, threads });
+    out.push({ name: b.name, ch, items, threads, links });
   }
   return { bots: out, state: st };
 }
@@ -391,10 +393,10 @@ async function pollShopee(hubUrl) {
   return { shop: r.user, sessions: r.checked, items: r.items.length, newIn: fresh.length };
 }
 /** ส่งข้อมูลดิบเข้า Chat Hub ทีละ 40 ข้อความ · คืนรายการข้อความลูกค้าที่เพิ่งเข้าใหม่ (Chat Hub เป็นคนบอก) */
-async function sendHub(hubUrl, ch, src, ctx, items, threads) {
+async function sendHub(hubUrl, ch, src, ctx, items, threads, extra) {
   const fresh = [];
   for (let i = 0; i < Math.max(items.length, 1); i += 40) {   // อย่างน้อย 1 ครั้งเสมอ (ส่งข้อมูลห้องแชท = สถานะอ่าน แม้ไม่มีข้อความใหม่)
-    const resp = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ch, src, ctx, ver: VER, items: items.slice(i, i + 40), threads: i === 0 ? (threads || []) : [] }) });
+    const resp = await fetch(hubUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ ch, src, ctx, ver: VER, items: items.slice(i, i + 40), threads: i === 0 ? (threads || []) : [] }, i === 0 ? extra || {} : {})) });
     let j = null; try { j = await resp.json(); } catch (e) { }
     if (!j || !j.ok) throw new Error('Chat Hub ไม่รับข้อมูล' + (j && j.error ? ' (' + j.error + ')' : ' – ตรวจลิงก์ในตั้งค่า'));
     (j.fresh || []).forEach(x => fresh.push(x));

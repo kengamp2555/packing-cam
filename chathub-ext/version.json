@@ -1,5 +1,5 @@
 {
-  "version": "0.9.1",
+  "version": "0.9.2",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "แก้ LINE OA ดึงข้อความไม่ได้"
+  "notes": "LINE OA: รวมแชทให้อยู่ห้องเดียวกับข้อความลูกค้า (แก้ชื่อซ้ำ 2 ห้อง)"
 }
