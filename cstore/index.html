@@ -373,7 +373,7 @@ async function openOrders() {
     $('sbox').innerHTML = '<div class="sh-h"><h3>🧾 คำสั่งซื้อของฉัน</h3><button class="x">✕</button></div>' + (r.orders.length ? r.orders.map(o =>
       '<div class="ocard"><div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(o.no) + '</b><span class="st ' + esc(o.status) + '">' + esc(o.statusTh) + '</span></div>' +
       '<div class="note">' + esc(o.created.slice(0, 16)) + ' · ' + (o.method === 'ship' ? '🚚 จัดส่ง' : '🏪 รับที่ร้าน') + ' · ' + (o.pay === 'qr' ? 'โอน' : 'จ่ายที่ร้าน') + '</div>' +
-      o.items.map(l => '<div>• ' + esc(l.n) + ' ×' + l.q + ' <span class="note">฿' + fmt(l.t) + '</span></div>').join('') + '<div style="font-weight:800;margin-top:4px">รวม ฿' + fmt(o.total) + '</div>' +
+      o.items.map(l => l.x ? '<div style="opacity:.6">• <s>' + esc(l.n) + ' ×' + l.q + '</s> <span class="note">ยกเลิก</span></div>' : '<div>• ' + esc(l.n) + ' ×' + l.q + ' <span class="note">฿' + fmt(l.t) + '</span></div>').join('') + '<div style="font-weight:800;margin-top:4px">รวม ฿' + fmt(o.total) + '</div>' +
       (o.track ? '<div>📦 เลขพัสดุ: <b>' + esc(o.track) + '</b></div>' : '') + (o.cancel ? '<div class="err">เหตุผลยกเลิก: ' + esc(o.cancel) + '</div>' : '') +
       (o.packImgs.length ? '<div class="imgs">' + o.packImgs.map(u => '<img src="' + esc(u) + '=w400" alt="" onclick="window.open(\'' + esc(u) + '\')">').join('') + '</div>' : '') +
       (o.pay === 'qr' && (o.status === 'new' || o.status === 'slip') ? '<button class="btn sec2" style="margin-top:8px" onclick="payAgain(\'' + esc(o.no) + '\',' + o.total + ')">' + (o.hasSlip ? '📎 ส่งสลิปใหม่ / ดู QR' : '📱 จ่ายเงิน / แนบสลิป') + '</button>' : '') + '</div>').join('') : '<div class="empty">ยังไม่มีคำสั่งซื้อ</div>');
