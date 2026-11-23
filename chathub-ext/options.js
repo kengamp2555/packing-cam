@@ -9,6 +9,7 @@ $('save').onclick = async () => {
   const st = await chrome.runtime.sendMessage({ cmd: 'pollNow' });
   const lz = (st && st.lazada) || {}, sp = (st && st.shopee) || {};
   $('msg').textContent = !st || !st.ok ? '❌ ' + ((st && st.error) || 'ไม่สำเร็จ') :
-    'Lazada: ' + (st.lazada ? (lz.error ? '❌ ' + lz.error : '✅ ' + (lz.items || 0) + ' ข้อความ') : 'ปิด') + ' · Shopee: ' + (st.shopee ? (sp.error ? '❌ ' + sp.error : '✅ ' + sp.shop + ' ' + (sp.items || 0) + ' ข้อความ') : 'ปิด');
+    'Lazada: ' + (st.lazada ? (lz.error ? '❌ ' + lz.error : '✅ ' + (lz.items || 0) + ' ข้อความ') : 'ปิด') + ' · Shopee: ' + (st.shopee ? (sp.error ? '❌ ' + sp.error : '✅ ' + sp.shop + ' ' + (sp.items || 0) + ' ข้อความ') : 'ปิด') +
+    ' · LINE OA: ' + (st.line ? (st.line.error ? '❌ ' + st.line.error : '✅ ' + (st.line.bots || '-') + ' ' + (st.line.items || 0) + ' ข้อความ') : 'ปิด');
 };
 $('reset').onclick = async () => { await chrome.runtime.sendMessage({ cmd: 'reset' }); $('msg').textContent = 'ล้างความจำแชทแล้ว – รอบหน้าจะดึงย้อน 3 วันใหม่'; };

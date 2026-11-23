@@ -1,5 +1,5 @@
 {
-  "version": "0.9.0",
+  "version": "0.9.1",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "LINE OA: เห็นข้อความที่ร้านตอบในแอป LINE OA + สถานะอ่าน"
+  "notes": "แก้ LINE OA ดึงข้อความไม่ได้"
 }

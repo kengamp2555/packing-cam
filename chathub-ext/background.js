@@ -140,7 +140,8 @@ async function lnPollInPage(state, map) {
     const ch = map[b.name]; if (!ch) continue;
     const seen = Object.assign({}, st[b.botId] || {}), items = [], threads = [];
     let chats = [];
-    try { chats = (await get('/api/v2/bots/' + b.botId + '/chats?folderType=ALL&limit=30')).list || []; } catch (e) { if (e.message === 'login') return { error: 'login' }; continue; }
+    try { chats = (await get('/api/v2/bots/' + b.botId + '/chats?folderType=ALL&limit=25')).list || []; }   // สูงสุด 25 ต่อครั้ง
+    catch (e) { if (e.message === 'login') return { error: 'login' }; return { error: b.name + ': ' + e.message }; }
     for (const c of chats) {
       if (c.chatType && c.chatType !== 'USER') continue;
       threads.push({ uid: c.chatId, raw: { userLastReadAt: c.userLastReadAt || 0, lastSentAt: c.lastSentAt || 0 } });
