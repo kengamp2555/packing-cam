@@ -60,10 +60,12 @@ async function runJobs(manual) {
     const j = await hubPost(hubUrl, { cmd: 'jobs', ver: VER });
     if (!j || !j.ok) throw new Error((j && j.error) || 'Chat Hub ไม่ตอบ');
     const spUser = String((await store.get('spCh')) || '').replace(/^shopee-/, '').toLowerCase();
+    const sharedOff = (await store.get('jobsSharedOn')) === false;   // งานที่ไม่ผูกกับร้าน Shopee (LnwShop, Lazada) ทำแค่โปรไฟล์เดียว
     const st = (await store.get('jobState')) || {}, now = Date.now();
     for (const t of j.tabs || []) {
       const shop = (String(t.key).match(/^(?:shopee|income):(.+)$/) || [])[1];
       if (shop && shop.toLowerCase() !== spUser) { out.items.push({ label: t.label, state: 'skip', note: 'ร้านนี้ไม่ได้ล็อกอินใน Chrome นี้' }); continue; }
+      if (!shop && sharedOff) { out.items.push({ label: t.label, state: 'skip', note: 'ปิดไว้ในโปรไฟล์นี้ (ให้โปรไฟล์หลักทำ)' }); continue; }
       if (t.group === 'open') { const r = await keepOpen(t.url); out.items.push({ label: t.label, state: t.online ? 'ok' : 'wait', note: r === 'ok' ? (t.online ? 'เปิดอยู่' : 'เปิดอยู่ รอสคริปต์ส่งสถานะ') : 'เพิ่งเปิดแท็บให้' }); continue; }
       const s = st[t.key] || {};
       if (t.online) {   // ทำเสร็จแล้ว → ปิดแท็บที่ส่วนเสริมเปิดไว้

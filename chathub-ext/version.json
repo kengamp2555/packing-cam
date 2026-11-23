@@ -1,5 +1,5 @@
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "รายการสินค้า Shopee / Lazada สำหรับกล่องค้นหาสินค้าใน Chat Hub"
+  "notes": "ตั้งค่าแยกโปรไฟล์ (ร้าน Keng77): ปิดงาน LnwShop / Lazada ในโปรไฟล์รองได้"
 }
