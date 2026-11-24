@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.7
+// @version      2.8
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -37,6 +37,7 @@
   const HB_MS = 15000;
   const HOST = location.hostname;
   const P = { momoQ: {}, momoT: 0, busy: false, msg: '', tbLast: null, tbSeq: 0, tbLoadedAt: 0 };
+  const LOADED = Date.now();   // แท็บเบื้องหลังที่เปิดนาน Chrome จะหน่วงตัวจับเวลา → ดึงอัตโนมัติจะโหลดหน้าใหม่ก่อนเสมอ (ดึงเร็ว)
   const cfg = () => ({ url: GM_getValue('it_url', ''), token: GM_getValue('it_token', '') });
 
   GM_registerMenuCommand('⚙️ ตั้งค่า Import Tracker', () => {
@@ -514,11 +515,21 @@
     const [ready, why] = readiness();
     if (site() === 'momo' && !P.busy) { const v = readRate(); if (v) sendRate(v, 'momo-page'); }
     try {
-      const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy || ready ? (P.msg || 'พร้อม') : why, ver: GM_info.script.version });
-      if (r.pull && ready && !P.busy) { say((site() === 'tb' ? 'Taobao' : 'Momo') + ': แอปสั่งดึง – เริ่ม…'); run().then(() => setTimeout(beat, 500)); }
+      const r = await post({ action: 'hb', site: site(), ready, busy: P.busy, msg: P.busy || ready ? (P.msg || 'พร้อม') : why, ver: GM_info.script.version, age: Date.now() - LOADED });
+      if (r.pull && ready && !P.busy) {
+        if (r.auto && site() === 'momo' && Date.now() - LOADED > 3 * 60e3) { GM_setValue('momo_resume', Date.now()); say('Momo: ถึงรอบดึงอัตโนมัติ – โหลดหน้าใหม่ก่อน…'); location.reload(); return; }
+        say((site() === 'tb' ? 'Taobao' : 'Momo') + ': ' + (r.auto ? 'ถึงรอบดึงอัตโนมัติ' : 'แอปสั่งดึง') + ' – เริ่ม…'); run().then(() => setTimeout(beat, 500));
+      }
     } catch (e) { /* เน็ตหลุดชั่วคราว: รอบหน้าลองใหม่ */ }
   }
-  if (/momocargo/.test(HOST)) hookXhr();
+  if (/momocargo/.test(HOST)) {
+    hookXhr();
+    // เพิ่งโหลดหน้าใหม่เพราะถึงรอบดึงอัตโนมัติ → ดึงต่อเมื่อหน้าพร้อม
+    if (Date.now() - +GM_getValue('momo_resume', 0) < 2 * 60e3) {
+      GM_setValue('momo_resume', 0);
+      (async () => { for (let i = 0; i < 90 && !readiness()[0]; i++) await sleep(1000); if (readiness()[0]) run(); else say('Momo: หน้าไม่พร้อม (ล็อกอินหรือยัง?)', 1); })();
+    }
+  }
   else {
     hookTbXhr(); P.tbLoadedAt = Date.now();
     // เพิ่งโหลดหน้าใหม่เพราะแอปสั่งดึง → ดึงต่อเมื่อข้อมูลหน้าแรกมาถึง
