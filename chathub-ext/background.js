@@ -42,13 +42,9 @@ const JOB_WAIT = 20 * 60e3, JOB_RETRY = 3 * 3600e3, JOB_GIVEUP = 2 * 3600e3;
 let jobsBusy = false;
 async function tabAlive(id) { try { await chrome.tabs.get(id); return true; } catch (e) { return false; } }
 async function keepOpen(url) {
-  const base = url.split('?')[0], u = new URL(base);
-  const tabs = await chrome.tabs.query({ url: u.origin + (u.pathname || '/') + '*' });
-  let t = tabs[0];
-  if (!t) { t = await chrome.tabs.create({ url, active: false, pinned: true }); return 'opened'; }
-  try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
-  if (t.discarded) { await chrome.tabs.reload(t.id); return 'reloaded'; }
-  return 'ok';
+  const base = url.split('?')[0];
+  const r = await helperTab(u => u.split('?')[0].indexOf(base) === 0, url, true);
+  return r.opened ? 'opened' : 'ok';
 }
 async function runJobs(manual) {
   if (jobsBusy) return store.get('jobsLast');
@@ -84,6 +80,7 @@ async function runJobs(manual) {
       }
       if (s.openedAt && now - s.openedAt < JOB_RETRY) { out.items.push({ label: t.label, state: 'warn', note: 'ยังไม่เสร็จ – ลองใหม่ ' + new Date(s.openedAt + JOB_RETRY).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) }); continue; }
       const tab = await chrome.tabs.create({ url: t.url, active: false });
+      await intoGroup(tab);
       st[t.key] = { openedAt: now, tabId: tab.id };
       out.items.push({ label: t.label, state: 'run', note: 'เพิ่งเปิดแท็บให้' });
     }
@@ -98,14 +95,7 @@ async function runJobs(manual) {
  * ข้อความจากลูกค้ายังมาทาง Webhook ตามเดิม · ส่วนเสริมส่งเฉพาะ "ข้อความที่ร้านส่ง" + เวลาที่ลูกค้าอ่าน */
 const LN_CHAT = 'https://chat.line.biz/';
 const LN_CH = { 'C-Store': 'line-cstore', 'KengAmp': 'line-kengamp' };   // ชื่อบัญชี LINE OA → ช่องทางใน Chat Hub
-async function lineTab() {
-  const tabs = await chrome.tabs.query({ url: 'https://chat.line.biz/*' });
-  let t = tabs[0];
-  if (!t) { t = await chrome.tabs.create({ url: LN_CHAT, active: false, pinned: true }); await waitComplete(t.id); }
-  try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
-  if (t.discarded) { await chrome.tabs.reload(t.id); await waitComplete(t.id); }
-  return t;
-}
+async function lineTab() { return (await helperTab(u => /^https:\/\/chat\.line\.biz\//.test(u), LN_CHAT)).tab; }
 async function pollLineOA(hubUrl) {
   const state = (await store.get('lnState')) || {};
   const tab = await lineTab();
@@ -113,7 +103,7 @@ async function pollLineOA(hubUrl) {
   const r = res && res.result;
   if (!r) return { error: 'อ่านหน้า LINE OA ไม่ได้' };
   if (r.error) {
-    if (r.error === 'login') await notifyOnce('lnlogin', 'LINE OA Manager ออกจากระบบแล้ว', 'เปิดแท็บ chat.line.biz ที่ปักหมุดไว้ แล้วล็อกอินใหม่');
+    if (r.error === 'login') await notifyOnce('lnlogin', 'LINE OA Manager ออกจากระบบแล้ว', 'เปิดกลุ่มแท็บ 🧰 ผู้ช่วยร้าน → แท็บ LINE แล้วล็อกอินใหม่');
     return { error: r.error === 'login' ? 'ต้องล็อกอิน LINE OA (chat.line.biz) ใหม่' : r.error };
   }
   let n = 0;
@@ -337,16 +327,39 @@ function badge(st) {
 }
 
 /* ---------- Lazada ---------- */
-async function lazadaTab() {
-  const tabs = await chrome.tabs.query({ url: 'https://sellercenter.lazada.co.th/*' });
-  let t = tabs.find(x => /\/apps\/im\//.test(x.url || '')) || tabs[0];
+async function lazadaTab() { return (await helperTab(u => /^https:\/\/sellercenter\.lazada\.co\.th\/apps\/im\//.test(u), LZ_CHAT)).tab; }
+/* ---------- 🧰 แท็บผู้ช่วย: รวมไว้ในกลุ่มแท็บ "🧰 ผู้ช่วยร้าน" (ยุบไว้) · 1 แท็บต่องาน ใช้ซ้ำ ไม่เปิดใหม่ ----------
+ * แท็บปักหมุดแบบเดิม → ถอดหมุดแล้วย้ายเข้ากลุ่ม (แท็บปักหมุดอยู่ในกลุ่มไม่ได้) · แท็บที่ผู้ใช้เปิดเอง (ไม่ปักหมุด/ไม่อยู่ในกลุ่ม) ไม่ยุ่ง */
+const GRP_TITLE = '🧰 ผู้ช่วยร้าน';
+async function ourGroup(windowId) {
+  try { const gs = await chrome.tabGroups.query({ title: GRP_TITLE }); return gs.find(g => g.windowId === windowId) || gs[0] || null; } catch (e) { return null; }
+}
+async function intoGroup(tab) {
+  try {
+    if (tab.pinned) tab = await chrome.tabs.update(tab.id, { pinned: false });
+    const g = await ourGroup(tab.windowId);
+    if (g) { if (tab.groupId !== g.id) await chrome.tabs.group({ groupId: g.id, tabIds: [tab.id] }); }
+    else { const gid = await chrome.tabs.group({ tabIds: [tab.id] }); await chrome.tabGroups.update(gid, { title: GRP_TITLE, color: 'blue', collapsed: true }); }
+    await chrome.tabs.update(tab.id, { autoDiscardable: false });
+  } catch (e) { console.warn('intoGroup', e); }
+  return tab;
+}
+/** หาแท็บผู้ช่วยของงานนี้ (match = ฟังก์ชันตรวจ URL) · ไม่มี → เปิดใหม่ในกลุ่ม · มีซ้ำ (ของส่วนเสริม) → ปิดตัวที่เกิน */
+async function helperTab(match, url, noWait) {
+  const all = await chrome.tabs.query({}), g = await ourGroup(), inG = x => g && x.groupId === g.id;
+  const found = all.filter(x => match(x.url || x.pendingUrl || ''));
+  let t = found.find(inG) || found.find(x => x.pinned) || found[0];
+  for (const x of found) if (t && x.id !== t.id && (inG(x) || x.pinned)) { try { await chrome.tabs.remove(x.id); } catch (e) { } }
   if (!t) {
-    t = await chrome.tabs.create({ url: LZ_CHAT, active: false, pinned: true });
-    await waitComplete(t.id);
+    t = await chrome.tabs.create({ url, active: false });
+    await intoGroup(t);
+    if (!noWait) await waitComplete(t.id);
+    return { tab: await chrome.tabs.get(t.id), opened: true };
   }
-  try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
-  if (t.discarded) { await chrome.tabs.reload(t.id); await waitComplete(t.id); }
-  return t;
+  if (t.pinned) t = await intoGroup(t);   // แท็บปักหมุดรุ่นเก่า → ย้ายเข้ากลุ่ม
+  else if (inG(t)) { try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { } }
+  if (t.discarded) { await chrome.tabs.reload(t.id); if (!noWait) await waitComplete(t.id); }
+  return { tab: t, opened: false };
 }
 function waitComplete(id) {
   return new Promise(res => {
@@ -363,7 +376,7 @@ async function pollLazada(hubUrl) {
   const r = res && res.result;
   if (!r) return { error: 'อ่านหน้า Lazada ไม่ได้' };
   if (r.error) {
-    if (r.error === 'login') await notifyOnce('lzlogin', 'Lazada Seller Center ออกจากระบบแล้ว', 'เปิดแท็บ Lazada ที่ปักหมุดไว้ แล้วล็อกอินใหม่');
+    if (r.error === 'login') await notifyOnce('lzlogin', 'Lazada Seller Center ออกจากระบบแล้ว', 'เปิดกลุ่มแท็บ 🧰 ผู้ช่วยร้าน → แท็บ Lazada แล้วล็อกอินใหม่');
     return { error: r.error === 'login' ? 'ต้องล็อกอิน Lazada ใหม่' : r.error };
   }
   const fresh = await sendHub(hubUrl, LZ_CH, 'lazada', {}, r.items, r.threads);
@@ -374,14 +387,7 @@ async function pollLazada(hubUrl) {
 /* ---------- Shopee (Seller Centre แชท · ร้านที่ล็อกอินอยู่ในเบราว์เซอร์นี้) ---------- */
 const SP_CHAT = 'https://seller.shopee.co.th/new-webchat/conversations';
 const SP_CH = { kengann9: 'shopee-kengann9', keng77: 'shopee-keng77' };   // ชื่อผู้ใช้ร้าน → ช่องทางใน Chat Hub
-async function shopeeTab(needChat) {
-  const tabs = await chrome.tabs.query({ url: 'https://seller.shopee.co.th/*' });
-  let t = tabs.find(x => /new-webchat/.test(x.url || '')) || (needChat ? null : tabs[0]);
-  if (!t) { t = await chrome.tabs.create({ url: SP_CHAT, active: false, pinned: true }); await waitComplete(t.id); }
-  try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { }
-  if (t.discarded) { await chrome.tabs.reload(t.id); await waitComplete(t.id); }
-  return t;
-}
+async function shopeeTab() { return (await helperTab(u => /^https:\/\/seller\.shopee\.co\.th\/new-webchat/.test(u), SP_CHAT)).tab; }
 async function pollShopee(hubUrl) {
   const all = (await store.get('spState')) || {};
   const tab = await shopeeTab();
@@ -389,7 +395,7 @@ async function pollShopee(hubUrl) {
   const r = res && res.result;
   if (!r) return { error: 'อ่านหน้า Shopee ไม่ได้' };
   if (r.error) {
-    if (r.error === 'login') await notifyOnce('splogin', 'Shopee Seller Centre ออกจากระบบแล้ว', 'เปิดแท็บ Shopee ที่ปักหมุดไว้ แล้วล็อกอินใหม่');
+    if (r.error === 'login') await notifyOnce('splogin', 'Shopee Seller Centre ออกจากระบบแล้ว', 'เปิดกลุ่มแท็บ 🧰 ผู้ช่วยร้าน → แท็บ Shopee แล้วล็อกอินใหม่');
     return { error: r.error === 'login' ? 'ต้องล็อกอิน Shopee ใหม่ (เปิดหน้าแชทใน Seller Centre)' : r.error };
   }
   const ch = SP_CH[String(r.user || '').toLowerCase()];
