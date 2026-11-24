@@ -312,9 +312,9 @@ async function pollAll(why) {
   try {
     const url = await store.get('hubUrl');
     if (!url) throw new Error('ยังไม่ได้ตั้งลิงก์ Chat Hub (กดไอคอน → ตั้งค่า)');
-    if ((await store.get('lzOn')) !== false) { try { st.lazada = await pollLazada(url); } catch (e) { st.lazada = { error: String(e && e.message || e) }; } }
-    if ((await store.get('spOn')) !== false) { try { st.shopee = await pollShopee(url); } catch (e) { st.shopee = { error: String(e && e.message || e) }; } }
-    if ((await store.get('lnOn')) !== false) { try { st.line = await pollLineOA(url); } catch (e) { st.line = { error: String(e && e.message || e) }; } }
+    // 3 แพลตฟอร์มดึงพร้อมกัน (คนละแท็บ) – เดิมทำทีละอัน รอนาน
+    const run = async (on, k, fn) => { if ((await store.get(on)) === false) return; try { st[k] = await fn(url); } catch (e) { st[k] = { error: String(e && e.message || e) }; } };
+    await Promise.all([run('lzOn', 'lazada', pollLazada), run('spOn', 'shopee', pollShopee), run('lnOn', 'line', pollLineOA)]);
     st.ok = true;
   } catch (e) { st.ok = false; st.error = String(e && e.message || e); }
   finally { busy = false; if (outboxAgain) setTimeout(processOutbox, 0); }

@@ -1,5 +1,5 @@
 {
-  "version": "0.12.0",
+  "version": "0.12.1",
   "zip": "https://kengamp2555.github.io/packing-cam/chathub-ext/chathub-connector.zip",
-  "notes": "รายการสินค้า: เก็บตัวเลือกย่อย (ราคา/สต็อกรายตัวเลือก)"
+  "notes": "ดึงแชทเร็วขึ้น (3 แพลตฟอร์มพร้อมกัน)"
 }
