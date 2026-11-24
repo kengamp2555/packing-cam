@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.8
+// @version      2.9
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -185,8 +185,8 @@
         '<div id="itS_shopBox" style="' + box('#fff', '#d9480f') + '"><b style="color:#d9480f">① ข้อมูลร้าน</b> <span style="color:#667;font-size:12px">ชีต Dealer + หน้าดีลเลอร์ POS</span>' +
         '<div style="display:flex;gap:8px;align-items:center;margin:6px 0">' + (x.logo ? '<img src="' + x.logo + '" style="width:44px;height:44px;object-fit:contain;border:1px solid #eee;border-radius:6px">' : '<span style="color:#b42318">ไม่พบโลโก้</span>') + '<div id="itS_match" style="flex:1;padding:6px 8px;background:#f6f8fa;border-radius:8px;color:#667">🔎 กำลังเช็กว่ามีร้านนี้ในระบบแล้วไหม…</div></div>' +
         '<div id="itS_pk" hidden>' + inp('itS_q', '', 'ค้นร้านเดิม: ชื่อไทย/จีน/รหัส D…') + '<div id="itS_ql" style="max-height:150px;overflow:auto"></div><a href="#" id="itS_new" style="font-size:12px">หรือ เพิ่มเป็นร้านใหม่ (ไม่ทับร้านไหน)</a></div>' +
-        'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อไทย (ว่าง = ใช้ชื่อเดิม / ร้านใหม่แปลให้อัตโนมัติ)<div style="display:flex;gap:6px;align-items:center">' + inp('itS_th', '', 'ปล่อยว่างได้') + sBtn('itS_tr', '🔄 แปลใหม่', 'แปลชื่อไทยใหม่จากชื่อจีนด้านบน') + '</div>' + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
-        '<div style="color:#667;font-size:12px">อัปเดตร้าน = ชื่อไทย · ชื่อจีน · ลิงก์ · โลโก้ ตามช่องด้านบน · ช่องร้าน BP/BU/BZ ในชีต Product เปลี่ยนตามให้</div>' +
+        'ชื่อร้าน (จีน)' + inp('itS_cn', x.cn, '升业电子') + 'ชื่อร้าน (อังกฤษ) (ว่าง = ใช้ชื่อเดิม / ร้านใหม่แปลเป็นอังกฤษให้อัตโนมัติ)<div style="display:flex;gap:6px;align-items:center">' + inp('itS_th', '', 'ปล่อยว่างได้') + sBtn('itS_tr', '🔄 แปลใหม่', 'แปลชื่อไทยใหม่จากชื่อจีนด้านบน') + '</div>' + 'ลิงก์ร้าน' + inp('itS_url', x.url, 'https://shopXXXX.taobao.com/') +
+        '<div style="color:#667;font-size:12px">อัปเดตร้าน = ชื่อร้าน (อังกฤษ) · ชื่อจีน · ลิงก์ · โลโก้ ตามช่องด้านบน · ช่องร้าน BP/BU/BZ ในชีต Product เปลี่ยนตามให้</div>' +
         '<div id="itS_msg" style="margin-top:4px;min-height:16px"></div><div style="text-align:right">' + bigBtn('itS_go', '💾 บันทึกร้าน', '#d9480f') + '</div></div>' +
         // ── กล่อง 2: ราคา + ลิงก์สินค้า (เฉพาะหน้าสินค้า) ──
         (isItem ? '<div id="itS_priceBox" style="' + box('#f5f9ff', '#2563eb') + '"><b style="color:#2563eb">② ราคา + ลิงก์สินค้า</b> <span style="color:#667;font-size:12px">ไม่แก้ข้อมูลร้าน</span>' +
@@ -230,7 +230,7 @@
       }).catch(e => { const M = $('itS_match'); if (M) M.innerHTML = '⚠️ เช็กร้านเดิมไม่ได้: ' + esc2(e.message) + ' (ถ้าเพิ่งอัปเดต Import Tracker ให้ Deploy New version ก่อน)'; });
       $('itS_tr').onclick = async () => { const cn = $('itS_cn').value.trim(); if (!cn) return msg('ใส่ชื่อร้านภาษาจีนก่อน', true);
         $('itS_tr').disabled = true; $('itS_tr').textContent = 'กำลังแปล…';
-        try { const r = await post({ action: 'translate', text: cn }); if (r.t) { $('itS_th').value = r.t; msg('แปลแล้ว – แก้ได้ก่อนกดบันทึก'); } else msg('แปลไม่ได้' + (r.err ? ': ' + r.err : ''), true); }
+        try { const r = await post({ action: 'translate', text: cn }); if (r.t) { $('itS_th').value = r.t; msg('แปลเป็นอังกฤษแล้ว – แก้ได้ก่อนกดบันทึก'); } else msg('แปลไม่ได้' + (r.err ? ': ' + r.err : ''), true); }
         catch (e) { msg('❌ ' + e.message, true); }
         $('itS_tr').disabled = false; $('itS_tr').textContent = '🔄 แปลใหม่'; };
       if (!x.cn || !x.url) msg('อ่านชื่อ/ลิงก์ร้านจากหน้านี้ได้ไม่ครบ – กรอกเอง หรือเปิดหน้าร้าน (กดปุ่ม 进店) แล้วกดปุ่มอีกครั้ง', true);
