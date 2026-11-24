@@ -1857,10 +1857,17 @@ function updateStats() {
 }
 
 /* ===== เสียง/สั่น/แฟลช ===== */
+/* iPhone ชอบ "พัก" ระบบเสียงเองเมื่อสลับแอป/ล็อกจอ/เปิดกล้องใหม่/มีสายเข้า
+   และจะปลุกกลับได้จากการแตะจอเท่านั้น → ตอนนั้นสแกนอัตโนมัติจะเงียบ
+   วิธีแก้: ใช้ Web Audio ถ้ากำลังทำงาน ไม่งั้นเล่นไฟล์เสียงสำรอง (<audio>) แทน
+   และพยายามปลุกระบบเสียงทุกครั้งที่แตะจอ / กลับเข้าแอป */
 let actx = null;
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// iOS เก่ากว่า 17 ไม่มี audioSession → Web Audio โดนปิดเมื่อเปิดสวิตช์เงียบ แต่ <audio> ยังดัง
+const PREFER_EL = IOS && !navigator.audioSession;
 function audio() {
   try {
-    if (!actx) {
+    if (!actx || actx.state === 'closed') {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
       actx = new AC();
@@ -1870,21 +1877,87 @@ function audio() {
   } catch (e) { return null; }
 }
 // ให้เสียงดังแม้เปิดสวิตช์โหมดเงียบ (iOS 17+)
-try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
-// iOS ต้องปลดล็อกเสียงจากการแตะจอครั้งแรก
-document.addEventListener('pointerdown', () => {
-  const c = audio();
-  if (c && !c._unlocked) {
-    const b = c.createBuffer(1, 1, 22050), s = c.createBufferSource();
-    s.buffer = b; s.connect(c.destination); s.start(0); c._unlocked = true;
+function setSession() { try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {} }
+setSession();
+
+/* ไฟล์เสียงสำรอง: สร้าง WAV ในเครื่อง (ไม่ต้องโหลดจากเน็ต) */
+function wavUrl(dur, fn) {
+  const sr = 22050, n = Math.floor(sr * dur), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  const st = {};
+  for (let i = 0; i < n; i++) {
+    const x = Math.max(-1, Math.min(1, fn(i / sr, st)));
+    v.setInt16(44 + i * 2, x * 32767, true);
   }
-}, true);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function env(t, a, h, r) { return t < a ? t / a : t < a + h ? 1 : t < a + h + r ? 1 - (t - a - h) / r : 0; }
+function hpNoise(st, k, amt) { const x = Math.random() * 2 - 1, y = x - (st[k] || 0); st[k] = x * amt; return y; }
+const SND = {};
+function sndEls() {
+  if (SND.beep) return SND;
+  const mk = url => [0, 1, 2].map(() => { const e = new Audio(url); e.preload = 'auto'; return e; });
+  SND.beep = mk(wavUrl(0.1, t => (Math.sin(2 * Math.PI * 2650 * t) > 0 ? 0.35 : -0.35) * env(t, 0.005, 0.065, 0.02)));
+  SND.shot = mk(wavUrl(0.16, (t, st) => {
+    let y = 0;
+    if (t < 0.035) y += hpNoise(st, 'a', 0.9) * Math.pow(1 - t / 0.035, 3) * 0.9;
+    const t2 = t - 0.075;
+    if (t2 >= 0 && t2 < 0.06) y += hpNoise(st, 'b', 0.6) * Math.pow(1 - t2 / 0.06, 3) * 0.7;
+    if (t < 0.06) y += Math.sin(2 * Math.PI * (220 - 2300 * t) * t) * 0.35 * (1 - t / 0.06);
+    return y;
+  }));
+  SND.i = { beep: 0, shot: 0 };
+  return SND;
+}
+function playEl(kind) {
+  try {
+    const s = sndEls(), list = s[kind], e = list[s.i[kind]++ % list.length];
+    e.muted = false; e.currentTime = 0;
+    const p = e.play(); if (p && p.catch) p.catch(() => {});
+    return true;
+  } catch (e) { return false; }
+}
+// ปลุกเสียงจากการแตะจอ: ทำทุกครั้งที่ระบบเสียงไม่ทำงาน (ไม่ใช่แค่ครั้งแรก)
+let elUnlocked = false;
+function unlockAudio() {
+  setSession();
+  const c = audio();
+  if (c && c.state !== 'running') {
+    try { const b = c.createBuffer(1, 1, 22050), s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start(0); } catch (e) {}
+  }
+  if (!elUnlocked) {
+    elUnlocked = true;
+    const s = sndEls();
+    [...s.beep, ...s.shot].forEach(e => { e.muted = true; const p = e.play(); if (p && p.then) p.then(() => { e.pause(); e.currentTime = 0; e.muted = false; }).catch(() => { e.muted = false; }); });
+  }
+}
+['pointerdown', 'touchend', 'click', 'keydown'].forEach(ev => document.addEventListener(ev, unlockAudio, true));
+// กลับเข้าแอป / หน้าโหลดจากแคช → ลองปลุกเสียง ถ้าระบบเสียงพังให้สร้างใหม่
+function wakeAudio() {
+  if (document.hidden || !actx) return;
+  setSession();
+  actx.resume().catch(() => {});
+  setTimeout(() => {
+    if (actx && actx.state !== 'running' && actx.state !== 'suspended') {   // 'interrupted' ค้าง
+      try { actx.close(); } catch (e) {}
+      actx = null; audio();
+    }
+  }, 600);
+}
+document.addEventListener('visibilitychange', wakeAudio);
+window.addEventListener('pageshow', wakeAudio);
+window.addEventListener('focus', wakeAudio);
+
+function canWebAudio() { const c = audio(); return c && c.state === 'running' && !PREFER_EL ? c : null; }
 
 /* เสียง "ติ๊ด" เหมือนเครื่องยิงบาร์โค้ด */
 function beepScan() {
   if (!S.beep) return;
-  const c = audio(); if (!c) return;
-  const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
+  const c = canWebAudio(); if (!c) { playEl('beep'); return; }
+  const t = c.currentTime + 0.005, o = c.createOscillator(), g = c.createGain();
   o.type = 'square'; o.frequency.value = 2650;
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(0.18, t + 0.005);
@@ -1906,7 +1979,7 @@ function noiseBurst(c, t, dur, vol, hp) {
 }
 function shutterSound() {
   if (!S.shutter) return;
-  const c = audio(); if (!c) return;
+  const c = canWebAudio(); if (!c) { playEl('shot'); return; }
   const t = c.currentTime + 0.005;
   noiseBurst(c, t, 0.035, 1.0, 1800);          // แช
   noiseBurst(c, t + 0.075, 0.06, 0.8, 900);    // ะ
