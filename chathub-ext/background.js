@@ -211,7 +211,9 @@ async function spCatalogInPage() {
     total = (j.data.page_info || {}).total || 0;
     (j.data.products || []).forEach(x => {
       const pd = x.price_detail || {}, lo = pd.selling_price_min || pd.price_min, hi = pd.selling_price_max || pd.price_max;
-      items.push({ id: String(x.id), name: x.name || '', sku: x.parent_sku || '', price: lo == hi ? '฿' + lo : '฿' + lo + '–' + hi, stock: Number((x.stock_detail || {}).total_available_stock || 0),
+      const models = (x.model_list || []).filter(m => m.name).slice(0, 60).map(m => { const pd2 = m.price_detail || {}, pp = Number(pd2.promotion_price) > 0 ? pd2.promotion_price : pd2.origin_price;
+        return { n: String(m.name).slice(0, 80), p: pp ? '฿' + pp : '', s: Number((m.stock_detail || {}).total_available_stock || 0) }; });
+      items.push({ id: String(x.id), name: x.name || '', sku: x.parent_sku || '', price: lo == hi ? '฿' + lo : '฿' + lo + '–' + hi, stock: Number((x.stock_detail || {}).total_available_stock || 0), models,
         img: x.cover_image ? 'https://cf.shopee.co.th/file/' + x.cover_image + '_tn' : '', url: 'https://shopee.co.th/product/' + shopId + '/' + x.id });
     });
     await new Promise(r => setTimeout(r, 250));
@@ -233,7 +235,8 @@ async function lzCatalogInPage() {
     total = ((d.pagination || {}).total) || 0;
     ((d.table || {}).dataSource || []).forEach(x => {
       const it = x.itemDesc || {}, pr = (x.price || {}).price || '';
-      items.push({ id: String(x.productId || x.itemId || ''), name: it.title || '', sku: '', price: pr ? '฿' + String(pr).replace(/-/, '–') : '', stock: Number(String((x.stock || {}).text || '0').replace(/[^\d]/g, '')) || 0,
+      const models = (x.subDataSource || []).slice(0, 60).map(m => ({ n: String(m.variation && m.variation !== '-' ? m.variation : '').slice(0, 80), p: (m.price || {}).price ? '฿' + String(m.price.price).replace(/\s*THB/gi, '').replace(/-/, '–').trim() : '', s: Number(String((m.stock || {}).text || '0').replace(/[^\d]/g, '')) || 0 })).filter(m => m.n);
+      items.push({ id: String(x.productId || x.itemId || ''), name: it.title || '', sku: '', price: pr ? '฿' + String(pr).replace(/-/, '–') : '', stock: Number(String((x.stock || {}).text || '0').replace(/[^\d]/g, '')) || 0, models,
         img: it.imageUrl || '', url: it.pdpLink || (x.productId ? 'https://www.lazada.co.th/products/i' + x.productId + '.html' : '') });
     });
     await new Promise(r => setTimeout(r, 300));
