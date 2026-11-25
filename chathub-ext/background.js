@@ -52,13 +52,16 @@ async function runJobs(manual) {
   const hubUrl = await store.get('hubUrl'); if (!hubUrl) return null;
   jobsBusy = true;
   const out = { at: Date.now(), items: [] };
+  const step = msg => store.set('jobsStep', { at: Date.now(), msg });   // ให้หน้าต่างส่วนเสริมเห็นว่ากำลังทำอะไร
   try {
+    await step('ถามรายการงานจาก Chat Hub / POS…');
     const j = await hubPost(hubUrl, { cmd: 'jobs', ver: VER });
     if (!j || !j.ok) throw new Error((j && j.error) || 'Chat Hub ไม่ตอบ');
     const spUser = String((await store.get('spCh')) || '').replace(/^shopee-/, '').toLowerCase();
     const sharedOff = (await store.get('jobsSharedOn')) === false;   // งานที่ไม่ผูกกับร้าน Shopee (LnwShop, Lazada) ทำแค่โปรไฟล์เดียว
     const st = (await store.get('jobState')) || {}, now = Date.now();
     for (const t of j.tabs || []) {
+      await step('ตรวจ ' + t.label + '…');
       const shop = (String(t.key).match(/^(?:shopee|income):(.+)$/) || [])[1];
       if (shop && shop.toLowerCase() !== spUser) { out.items.push({ label: t.label, state: 'skip', note: 'ร้านนี้ไม่ได้ล็อกอินใน Chrome นี้' }); continue; }
       if (!shop && sharedOff) { out.items.push({ label: t.label, state: 'skip', note: 'ปิดไว้ในโปรไฟล์นี้ (ให้โปรไฟล์หลักทำ)' }); continue; }
@@ -78,14 +81,16 @@ async function runJobs(manual) {
         st[t.key] = s;
         out.items.push({ label: t.label, state: s.notified ? 'warn' : 'run', note: s.notified ? 'ยังไม่เสร็จ – เปิดแท็บดู' : 'กำลังทำ' }); continue;
       }
-      if (s.openedAt && now - s.openedAt < JOB_RETRY) { out.items.push({ label: t.label, state: 'warn', note: 'ยังไม่เสร็จ – ลองใหม่ ' + new Date(s.openedAt + JOB_RETRY).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) }); continue; }
+      if (s.openedAt && now - s.openedAt < JOB_RETRY && !manual) {   // กดเช็กเอง → ลองเปิดใหม่ทันที ไม่ต้องรอรอบ
+        out.items.push({ label: t.label, state: 'warn', note: 'ยังไม่เสร็จ – ลองใหม่ ' + new Date(s.openedAt + JOB_RETRY).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) }); continue; }
+      await step('เปิดแท็บ ' + t.label + '…');
       const tab = await tabLock(async () => { const x = await chrome.tabs.create({ url: t.url, active: false }); await intoGroup(x); return x; });
       st[t.key] = { openedAt: now, tabId: tab.id };
       out.items.push({ label: t.label, state: 'run', note: 'เพิ่งเปิดแท็บให้' });
     }
     await store.set('jobState', st);
   } catch (e) { out.error = String(e && e.message || e); }
-  finally { jobsBusy = false; }
+  finally { jobsBusy = false; await store.set('jobsStep', null); }
   await store.set('jobsLast', out);
   return out;
 }

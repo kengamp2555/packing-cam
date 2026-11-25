@@ -29,7 +29,15 @@ function showJobs(j, on) {
     (j.items || []).map(x => '<br>' + (ic[x.state] || '') + ' ' + esc(x.label) + ' <span style="color:#6b7685">· ' + esc(x.note) + '</span>').join('');
 }
 chrome.storage.local.get(['jobsLast', 'jobsOn']).then(r => showJobs(r.jobsLast, r.jobsOn));
-$('jobsNow').onclick = async () => { $('jobsNow').disabled = true; const r = await chrome.runtime.sendMessage({ cmd: 'runJobs' }); showJobs(r, true); $('jobsNow').disabled = false; };
+// แสดงว่ากำลังทำอะไร (ส่วนเสริมบันทึกขั้นตอนไว้ทุกครั้งที่เริ่มงานใหม่)
+function showStep(s) { const el = $('jobStep'); if (!el) return; el.hidden = !s; el.textContent = s ? '⏳ ' + s.msg : ''; }
+chrome.storage.local.get('jobsStep').then(r => { if (r.jobsStep && Date.now() - r.jobsStep.at < 120000) showStep(r.jobsStep); });
+chrome.storage.onChanged.addListener(ch => { if (ch.jobsStep) showStep(ch.jobsStep.newValue); if (ch.jobsLast) chrome.storage.local.get('jobsOn').then(r => showJobs(ch.jobsLast.newValue, r.jobsOn)); });
+$('jobsNow').onclick = async () => {
+  const b = $('jobsNow'); b.disabled = true; b.textContent = '⏳ กำลังเช็กงานเบื้องหลัง…'; showStep({ msg: 'เริ่มเช็ก…' });
+  try { const r = await chrome.runtime.sendMessage({ cmd: 'runJobs' }); showJobs(r, true); } catch (e) { showStep({ msg: '❌ ' + (e.message || e) }); }
+  b.disabled = false; b.textContent = '✅ เช็กเสร็จแล้ว – กดอีกครั้งเพื่อเช็กใหม่'; setTimeout(() => { b.textContent = '🟢 เช็กงานเบื้องหลังตอนนี้'; }, 4000);
+};
 $('catNow').onclick = async () => { const b = $('catNow'); b.disabled = true; b.textContent = '⏳ กำลังอ่านรายการสินค้า (1–2 นาที)…'; const r = await chrome.runtime.sendMessage({ cmd: 'catalogNow' }); b.textContent = '📦 ' + (r && r.res ? Object.values(r.res).join(' · ') : 'เสร็จ'); b.disabled = false; };
 $('hub').onclick = async () => { const r = await load(); if (r.hubUrl) chrome.tabs.create({ url: r.hubUrl.split('?')[0] }); };
 $('opt').onclick = () => chrome.runtime.openOptionsPage();
