@@ -629,7 +629,7 @@ function renderToday(msg) {
       '<br>' + esc(x.src + ' ' + x.order) + (x.items ? '<br>' + esc(x.items) : '') + (x.reason ? '<br><span class="mut">เหตุผล: ' + esc(x.reason) + '</span>' : '') +
       '<br><button data-h="' + i + '" style="margin-top:6px;background:#e5484d">✓ เอาออกแล้ว</button></div>';
   });
-  const L = r.lazada, sp = r.shopee, o = r.other;
+  const L = r.lazada, sp = r.shopee, o = r.other, Q = r.pos, N = r.lnw;
   const allOk = r.totalExpect > 0 && r.totalPacked === r.totalExpect;
   h += '<h3>📦 รอส่งมอบให้ขนส่ง – ยิงแพคแล้ว <span class="' + (allOk ? 'ok' : r.totalExpect ? 'bad' : '') + '">' + r.totalPacked + ' / ' + r.totalExpect + '</span> กล่อง</h3><div class="stat">' +
     '<div>Lazada<b>' + L.packed + ' / ' + L.expect + '</b>' +
@@ -642,6 +642,9 @@ function renderToday(msg) {
       (x.notArranged ? '<br><span class="bad">🕒 ยังไม่ดำเนินการ ' + x.notArranged + '</span>' : '') +
       '<span class="mut" style="display:block;margin-top:6px;font-size:12.5px">' + (x.tabOnline ? '🟢 แท็บเปิดอยู่' : '⚪ แท็บไม่ได้เปิด') + (x.updatedAt ? ' · ' + esc(String(x.updatedAt).slice(11, 16)) + ' น.' : '') + '</span>' +
       (x.tabOnline ? '' : '<a href="https://seller.shopee.co.th/portal/sale/returnrefundcancel" target="_blank" rel="noopener" style="display:inline-block;margin-top:4px;padding:4px 10px;border-radius:8px;background:#3b6cf6;color:#fff;text-decoration:none;font-size:12.5px" title="เปิดในโปรไฟล์ Chrome ของร้าน ' + esc(x.shop) + ' (เครื่องที่ลง Tampermonkey)">เปิดแท็บ ' + esc(x.shop) + ' ↗</a>') + '</div>').join('') +
+    (Q ? '<div>POS (บิลส่งพัสดุ)<b>' + Q.packed + ' / ' + Q.expect + '</b>' +
+      (Q.error ? '<span class="bad">⚠️ อ่านบิล POS ไม่ได้</span>' : Q.expect ? (Q.missingCount ? '<span class="bad">⚠️ ยังไม่ยิง ' + Q.missingCount + '</span>' : '<span class="ok">✅ ครบ</span>') : '<span class="mut">ไม่มีบิลส่งพัสดุวันนี้</span>') + '</div>' : '') +
+    (N ? '<div>LnwShop หน้าร้าน<b>' + N.packed + '</b><span class="mut">ยิงวันนี้ (QR เลข OID)</span></div>' : '') +
     (o.packed ? '<div>ไม่ทราบช่องทาง<b>' + o.packed + '</b><span class="mut">ยิงวันนี้ · Flash/อื่น ๆ</span></div>' : '') +
     (r.noBarcode ? '<div id="tdNoBc" style="cursor:pointer;border:1px solid #3b6cf6">ไม่มีบาร์โค้ด<b>' + r.noBarcode + '</b><span style="color:#8ab4ff">แตะเพื่อดู / ลบ ›</span></div>' : '') + '</div>' +
     (r.noBarcode ? '<p class="mut" style="margin:4px 0">“ไม่มีบาร์โค้ด” = รูปที่ถ่ายวันนี้แต่กล้องอ่านบาร์โค้ดไม่ได้ (บันทึกเป็น NO-BARCODE) · ถ้าเป็นกล่องจริงให้ถ่ายใหม่ให้เห็นบาร์โค้ด · ถ้าถ่ายพลาดลบได้</p>' : '');
@@ -653,6 +656,9 @@ function renderToday(msg) {
     if (x.notArranged) h += '<p class="bad" style="margin:4px 0">🕒 Shopee ' + esc(x.shop) + ': ยังไม่ดำเนินการ (ยังไม่กดจัดส่ง) ' + x.notArranged + ' ออเดอร์' + (x.shipBy ? ' · ต้องส่งภายใน ' + esc(x.shipBy.slice(5, 16)) : '') + '</p>';
     // สถานะแท็บ/เวลาข้อมูลล่าสุด ย้ายไปแสดงในการ์ดของแต่ละร้านแล้ว
   });
+  if (Q && Q.missingCount) h += '<details open><summary>บิล POS ที่ติ๊กส่งพัสดุ แต่ยังไม่ยิงแพค (' + Q.missingCount + ')</summary><ul>' +
+    Q.missing.map(x => '<li>' + esc(x.bill) + ' <span class="mut">' + esc(x.ch) + (x.cust ? ' · ' + esc(x.cust) : '') + (x.d !== r.today ? ' · เมื่อวาน' : '') + '</span></li>').join('') + '</ul></details>';
+  if (N && N.packed) h += '<details><summary>LnwShop หน้าร้าน ยิงวันนี้ (' + N.packed + ')</summary><ul>' + N.list.map(x => '<li>OID ' + esc(x.track) + '</li>').join('') + '</ul></details>';
   if (o.packed) h += '<details' + (L.notPackedCount || (sp.shops || []).some(x => x.missingCount) ? ' open' : '') + '><summary>ไม่ทราบช่องทาง (' + o.packed + ')</summary>' +
     '<p class="mut" style="margin:4px 0">ส่วนใหญ่ = กล้องอ่านบาร์โค้ดผิด · กด 📷 ดูรูป ถ้าเป็นกล่องที่ยังไม่ยิงด้านบน กด 🔗 จับคู่ใหม่ในหน้ารูป</p><ul>' +
     o.list.map((x, i) => '<li style="margin:4px 0">' + esc(x.track) + (x.row ? '<button class="oBtn" data-o="' + i + '">📷 ดูรูป</button>' : '') + '</li>').join('') + '</ul></details>';
