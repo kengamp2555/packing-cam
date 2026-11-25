@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.48
+// @version      3.49
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -1820,11 +1820,30 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
             items.push((String(it.name || '').replace(/\s+/g, ' ').slice(0, 50) + (v ? ' [' + v + ']' : '')).trim() + ' ×' + (it.amount || 1));
           }));
           rows.push({ order: (p.card_header && p.card_header.order_sn) || '', track: status === 2 ? ((f.tracking_number_list || [])[0] || '') : '',
-            method: f.fulfilment_channel_name || '', shipBy: fmt(o.ship_by_date), items: items.join(' | ') });
+            method: f.fulfilment_channel_name || '', shipBy: fmt(o.ship_by_date), items: items.join(' | '), oid: o.order_id || '' });
         });
         await sleep(150);
       }
     }
+    // 💰 ราคาสินค้าแต่ละออเดอร์ (รหัสสินค้า · จำนวน · ราคาที่ขาย) → Packing Cam คิดกำไรต่อกล่องได้ทันที ไม่ต้องรอไฟล์คำสั่งซื้อรายวัน
+    //    อ่านอย่างเดียว · จำผลไว้ในเครื่อง ออเดอร์เดิมไม่ขอซ้ำ
+    let pc = {}; try { pc = JSON.parse(GM_getValue('tsPrice', '{}')) || {}; } catch (e) { }
+    const now = Date.now();
+    for (const x of rows) {
+      if (!x.oid) continue;
+      if (!pc[x.oid]) {
+        try {
+          const j = await fetch('/api/v3/order/get_one_order?SPC_CDS=' + cookie('SPC_CDS') + '&SPC_CDS_VER=2&order_id=' + x.oid, { credentials: 'include' }).then(r => r.json());
+          const its = (j && j.code === 0 && j.data && j.data.order_items) || [];
+          if (its.length) pc[x.oid] = { at: now, l: its.map(it => [String((it.item_model && it.item_model.sku) || (it.product && it.product.sku) || '').slice(0, 60), Number(it.amount) || 1, Number(it.order_price) || 0]) };
+        } catch (e) { }
+        await sleep(120);
+      }
+      if (pc[x.oid]) x.lines = JSON.stringify(pc[x.oid].l).slice(0, 1500);
+      delete x.oid;
+    }
+    Object.keys(pc).forEach(k => { if (now - pc[k].at > 10 * 864e5) delete pc[k]; });
+    GM_setValue('tsPrice', JSON.stringify(pc));
     return rows;
   }
   /** ออเดอร์ "ยกเลิกแล้ว" ที่ต้องดึงกล่องออก (ยกเลิกหลังกดจัดส่ง / มีเลขพัสดุ) · ออเดอร์ที่ตรวจแล้วจำไว้ ไม่ขอซ้ำ */
