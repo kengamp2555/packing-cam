@@ -12,6 +12,10 @@
   body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Sarabun",sans-serif}
   #wrap{max-width:640px;margin:0 auto;padding:8px}
   #tabs{display:flex;gap:6px;margin-bottom:8px}
+  #pfBar{background:#12291c;border:1px solid #1f5136;border-radius:10px;padding:8px 12px;margin-bottom:8px;cursor:pointer;user-select:none}
+  #pfBar .top{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
+  #pfBar b{font-size:20px}#pfBar .neg{color:#fca5a5}#pfBar .pos{color:#86efac}
+  #pfBar .sub{color:var(--mut);font-size:12px;margin-top:2px;line-height:1.5}
   #tabs button{flex:1;font-size:16px;font-weight:700;padding:12px 4px;white-space:nowrap}
   body.recv #tabs button#tRecv.on{background:#059669}
   body.recv #shot{background:#059669;font-size:22px}
@@ -223,6 +227,7 @@
     <button id="bellBtn" title="แจ้งเตือนวันนี้">🔔<span id="bellN" hidden></span></button>
     <button id="cfg">⚙️</button>
   </div>
+  <div id="pfBar" hidden title="แตะเพื่อสลับ บาท / %"></div>
   <div id="holdBox" hidden></div>
   <div id="todayPanel" hidden><div class="sheet" id="todaySheet"></div></div>
   <div id="holdAlert" hidden></div>
@@ -322,6 +327,7 @@
     <label class="f">ชื่อพนักงาน (บันทึกว่าใครรับของคืน)
       <input id="sStaff" type="text" autocorrect="off" spellcheck="false" placeholder="เช่น ต้น">
     </label>
+    <label class="chk"><input type="checkbox" id="sProfit"> 💰 แสดงกำไรวันนี้ / เดือนนี้ (เฉพาะเครื่องนี้ · อย่าเปิดในเครื่องพนักงาน)</label>
     <label class="chk"><input type="checkbox" id="sBeep"> เสียง "ติ๊ด" เมื่อสแกนเจอบาร์โค้ด</label>
     <label class="chk"><input type="checkbox" id="sShutter"> เสียง "แชะ" เมื่อถ่ายรูป</label>
     <label class="f">ขนาดภาพกล้องสด
@@ -529,6 +535,33 @@ function saveAuto() {
     autoMsg = r.warn || ''; autoOpen = !!r.warn; renderToday(r.warn ? '' : '✅ บันทึกแล้ว: ' + autoLabel(r.auto).slice(2));
   }).catch(e => { autoMsg = '❌ ' + (e.message || e); renderToday(''); });
 }
+/* ===== 💰 กำไรวันนี้ (ทุกช่องทาง จากบิลใน POS) · แตะ = สลับ บาท / % ===== */
+var pfData = null, pfTimer = 0;
+function pfFmt(o, big) {
+  if (!o || !o.bills) return '<b>-</b>';
+  const pct = o.rev ? o.profit / o.rev * 100 : 0, cls = o.profit < 0 ? 'neg' : 'pos';
+  const baht = '฿' + Math.round(o.profit).toLocaleString('th-TH'), p = pct.toFixed(1) + '%';
+  return S.pfUnit === 'pct' ? '<b class="' + cls + '">' + p + '</b>' + (big ? ' <span style="color:var(--mut)">' + baht + '</span>' : '') : '<b class="' + cls + '">' + baht + '</b>' + (big ? ' <span style="color:var(--mut)">' + p + '</span>' : '');
+}
+function renderProfit() {
+  const el = $('pfBar'); if (!el) return;
+  if (!S.profit || !pfData) { el.hidden = true; return; }
+  const d = pfData, T = d.today, M = d.month;
+  el.innerHTML = '<div class="top"><span>💰 กำไรวันนี้ ' + pfFmt(T, true) + '</span><span>เดือนนี้ ' + pfFmt(M, true) + '</span></div>' +
+    '<div class="sub">ขายวันนี้ ฿' + Math.round(T.rev).toLocaleString('th-TH') + ' · ' + T.bills + ' บิล' +
+    (d.channels.length ? ' · ' + d.channels.map(c => c.label + ' ' + (S.pfUnit === 'pct' ? (c.rev ? (c.profit / c.rev * 100).toFixed(0) + '%' : '-') : '฿' + Math.round(c.profit).toLocaleString('th-TH'))).join(' · ') : '') +
+    (T.noCost > 0 ? ' · <span style="color:#fbbf24">ไม่มีต้นทุน ฿' + Math.round(T.noCost).toLocaleString('th-TH') + '</span>' : '') + ' · อัปเดต ' + d.at + '</div>';
+  el.hidden = false;
+}
+function loadProfit() {
+  clearTimeout(pfTimer);
+  if (!S.profit || (!IN_GAS && !API_URL)) { renderProfit(); return; }
+  callApi('profitToday', {}).then(r => { pfData = r; renderProfit(); }).catch(() => {});
+  pfTimer = setTimeout(() => { if (!document.hidden) loadProfit(); }, 120000);   // อัปเดตทุก 2 นาทีระหว่างเปิดแอป
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.profit) loadProfit(); });
+setTimeout(() => { const b = $('pfBar'); if (b) b.onclick = () => { S.pfUnit = S.pfUnit === 'pct' ? 'baht' : 'pct'; saveS(); renderProfit(); }; loadProfit(); }, 800);
+
 function loadHold(fresh) {
   if (!IN_GAS && !API_URL) return Promise.resolve();
   if (todayBusy) return Promise.resolve();
@@ -1190,6 +1223,7 @@ function openSettings() {
   $('sSens').value = String(S.sens);
   $('sCamSize').value = S.camSize;
   $('sBeep').checked = S.beep;
+  $('sProfit').checked = !!S.profit;
   $('sStaff').value = S.staff || '';
   $('sShutter').checked = S.shutter;
   $('connBox').style.display = IN_GAS ? 'none' : '';
@@ -1212,6 +1246,7 @@ function applySettings() {
   S.sens = +$('sSens').value;
   S.camSize = $('sCamSize').value;
   S.beep = $('sBeep').checked;
+  S.profit = $('sProfit').checked; setTimeout(loadProfit, 300);
   S.staff = $('sStaff').value.trim();
   S.shutter = $('sShutter').checked;
   saveS();
@@ -1743,7 +1778,7 @@ window.addEventListener('beforeunload', e => {
 });
 
 /* ===== ติดต่อเซิร์ฟเวอร์ ===== */
-const GAS_FN = { upload: 'uploadPhoto', search: 'searchRecords', delete: 'deleteRecord', ping: 'pingServer', image: 'getImage',
+const GAS_FN = { profitToday: 'profitToday', upload: 'uploadPhoto', search: 'searchRecords', delete: 'deleteRecord', ping: 'pingServer', image: 'getImage',
                  rlookup: 'returnLookup', receive: 'returnReceive', rpending: 'returnPending',
                  shopeeShops: 'shopeeShops', shopeeUpload: 'shopeeUpload', shopeeRequest: 'shopeeRequest',
                  rdone: 'returnReceived', rimage: 'returnImage', rmatch: 'returnMatchOrder', hold: 'cancelHold', holdDone: 'cancelHoldDone',
