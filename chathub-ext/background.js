@@ -79,8 +79,7 @@ async function runJobs(manual) {
         out.items.push({ label: t.label, state: s.notified ? 'warn' : 'run', note: s.notified ? 'ยังไม่เสร็จ – เปิดแท็บดู' : 'กำลังทำ' }); continue;
       }
       if (s.openedAt && now - s.openedAt < JOB_RETRY) { out.items.push({ label: t.label, state: 'warn', note: 'ยังไม่เสร็จ – ลองใหม่ ' + new Date(s.openedAt + JOB_RETRY).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) }); continue; }
-      const tab = await chrome.tabs.create({ url: t.url, active: false });
-      await intoGroup(tab);
+      const tab = await tabLock(async () => { const x = await chrome.tabs.create({ url: t.url, active: false }); await intoGroup(x); return x; });
       st[t.key] = { openedAt: now, tabId: tab.id };
       out.items.push({ label: t.label, state: 'run', note: 'เพิ่งเปิดแท็บให้' });
     }
@@ -95,7 +94,7 @@ async function runJobs(manual) {
  * ข้อความจากลูกค้ายังมาทาง Webhook ตามเดิม · ส่วนเสริมส่งเฉพาะ "ข้อความที่ร้านส่ง" + เวลาที่ลูกค้าอ่าน */
 const LN_CHAT = 'https://chat.line.biz/';
 const LN_CH = { 'C-Store': 'line-cstore', 'KengAmp': 'line-kengamp' };   // ชื่อบัญชี LINE OA → ช่องทางใน Chat Hub
-async function lineTab() { return (await helperTab(u => /^https:\/\/chat\.line\.biz\//.test(u), LN_CHAT)).tab; }
+async function lineTab() { return platTab(u => /^https:\/\/chat\.line\.biz\//.test(u), LN_CHAT, 'LINE OA'); }
 async function pollLineOA(hubUrl) {
   const state = (await store.get('lnState')) || {};
   const tab = await lineTab();
@@ -330,12 +329,26 @@ function badge(st) {
 }
 
 /* ---------- Lazada ---------- */
-async function lazadaTab() { return (await helperTab(u => /^https:\/\/sellercenter\.lazada\.co\.th\/apps\/im\//.test(u), LZ_CHAT)).tab; }
+async function lazadaTab() { return platTab(u => /^https:\/\/sellercenter\.lazada\.co\.th\/apps\/im\//.test(u), LZ_CHAT, 'Lazada'); }
 /* ---------- 🧰 แท็บผู้ช่วย: รวมไว้ในกลุ่มแท็บ "🧰 ผู้ช่วยร้าน" (ยุบไว้) · 1 แท็บต่องาน ใช้ซ้ำ ไม่เปิดใหม่ ----------
  * แท็บปักหมุดแบบเดิม → ถอดหมุดแล้วย้ายเข้ากลุ่ม (แท็บปักหมุดอยู่ในกลุ่มไม่ได้) · แท็บที่ผู้ใช้เปิดเอง (ไม่ปักหมุด/ไม่อยู่ในกลุ่ม) ไม่ยุ่ง */
 const GRP_TITLE = '🧰 ผู้ช่วยร้าน';
+/* ---------- กลุ่มแท็บ 🧰 ผู้ช่วยร้าน ----------
+ * เดิม: 3 แพลตฟอร์มเปิดแท็บพร้อมกันตอนเปิด Chrome → ต่างคนต่างสร้างกลุ่มใหม่ (กลุ่มซ้ำหลายกลุ่ม)
+ *       และหน้าที่ยังไม่ล็อกอินถูกพาไปหน้า login (ลิงก์ไม่ตรง) → หาแท็บไม่เจอ → เปิดแท็บใหม่ทุกรอบ
+ * ตอนนี้: ทำทีละคำสั่ง (คิว) · รวมกลุ่มซ้ำเป็นกลุ่มเดียว · จำรหัสแท็บที่เปิดให้แต่ละงาน → อยู่หน้า login ก็ใช้แท็บเดิม ไม่เปิดเพิ่ม */
+let tabQ = Promise.resolve();
+function tabLock(fn) { const r = tabQ.then(fn, fn); tabQ = r.catch(() => { }); return r; }
 async function ourGroup(windowId) {
-  try { const gs = await chrome.tabGroups.query({ title: GRP_TITLE }); return gs.find(g => g.windowId === windowId) || gs[0] || null; } catch (e) { return null; }
+  try {
+    const gs = await chrome.tabGroups.query({ title: GRP_TITLE }); if (!gs.length) return null;
+    // กลุ่มชื่อเดียวกันหลายกลุ่มในหน้าต่างเดียวกัน → ย้ายแท็บเข้ากลุ่มแรก (กลุ่มที่ว่างจะหายไปเอง)
+    const byWin = {}; gs.forEach(g => (byWin[g.windowId] = byWin[g.windowId] || []).push(g));
+    for (const w of Object.keys(byWin)) { const [keep, ...extra] = byWin[w].sort((a, b) => a.id - b.id);
+      for (const g of extra) { try { const ts = await chrome.tabs.query({ groupId: g.id }); if (ts.length) await chrome.tabs.group({ groupId: keep.id, tabIds: ts.map(t => t.id) }); } catch (e) { } } }
+    const first = Object.values(byWin).map(a => a[0]);
+    return first.find(g => g.windowId === windowId) || first[0] || null;
+  } catch (e) { return null; }
 }
 async function intoGroup(tab) {
   try {
@@ -347,22 +360,41 @@ async function intoGroup(tab) {
   } catch (e) { console.warn('intoGroup', e); }
   return tab;
 }
-/** หาแท็บผู้ช่วยของงานนี้ (match = ฟังก์ชันตรวจ URL) · ไม่มี → เปิดใหม่ในกลุ่ม · มีซ้ำ (ของส่วนเสริม) → ปิดตัวที่เกิน */
-async function helperTab(match, url, noWait) {
+/** หาแท็บผู้ช่วยของงานนี้ (match = ฟังก์ชันตรวจ URL) · ไม่มี → ใช้แท็บที่เคยเปิดให้งานนี้ (แม้ถูกพาไปหน้า login) → ไม่มีจริง ๆ ค่อยเปิดใหม่ในกลุ่ม
+ *  คืน { tab, opened, login } · login = แท็บอยู่หน้าอื่น (มักเป็นหน้าเข้าสู่ระบบ) */
+function helperTab(match, url, noWait) { return tabLock(() => helperTabNow(match, url, noWait)); }
+async function helperTabNow(match, url, noWait) {
   const all = await chrome.tabs.query({}), g = await ourGroup(), inG = x => g && x.groupId === g.id;
   const found = all.filter(x => match(x.url || x.pendingUrl || ''));
   let t = found.find(inG) || found.find(x => x.pinned) || found[0];
   for (const x of found) if (t && x.id !== t.id && (inG(x) || x.pinned)) { try { await chrome.tabs.remove(x.id); } catch (e) { } }
+  const map = (await store.get('helperTabs')) || {};
+  if (!t && map[url]) {   // แท็บที่เคยเปิดให้งานนี้ยังอยู่ แต่ไปอยู่หน้าอื่น (เช่น หน้า login) → ใช้แท็บเดิม ไม่เปิดเพิ่ม
+    const old = all.find(x => x.id === map[url]);
+    if (old) { if (old.groupId !== (g && g.id)) await intoGroup(old); return { tab: old, opened: false, login: true }; }
+  }
   if (!t) {
     t = await chrome.tabs.create({ url, active: false });
     await intoGroup(t);
+    map[url] = t.id; await store.set('helperTabs', map);
     if (!noWait) await waitComplete(t.id);
-    return { tab: await chrome.tabs.get(t.id), opened: true };
+    t = await chrome.tabs.get(t.id);
+    return { tab: t, opened: true, login: !match(t.url || t.pendingUrl || '') && !t.pendingUrl };
   }
+  if (map[url] !== t.id) { map[url] = t.id; await store.set('helperTabs', map); }
   if (t.pinned) t = await intoGroup(t);   // แท็บปักหมุดรุ่นเก่า → ย้ายเข้ากลุ่ม
   else if (inG(t)) { try { await chrome.tabs.update(t.id, { autoDiscardable: false }); } catch (e) { } }
   if (t.discarded) { await chrome.tabs.reload(t.id); if (!noWait) await waitComplete(t.id); }
   return { tab: t, opened: false };
+}
+/** แท็บของแพลตฟอร์ม · ยังไม่ล็อกอิน → แจ้งเตือน (3 ชม./ครั้ง) และหยุดรอบนี้ (ไม่เปิดแท็บเพิ่ม) */
+async function platTab(match, url, name) {
+  const r = await helperTab(match, url);
+  if (r.login) {
+    await notifyOnce('login_' + name, name + ' ยังไม่ได้ล็อกอิน', 'เปิดกลุ่มแท็บ 🧰 ผู้ช่วยร้าน → แท็บ ' + name + ' แล้วล็อกอิน · ระหว่างนี้ส่วนเสริมจะไม่เปิดแท็บเพิ่ม');
+    throw new Error('ต้องล็อกอิน ' + name + ' ในแท็บกลุ่ม 🧰 ผู้ช่วยร้าน');
+  }
+  return r.tab;
 }
 function waitComplete(id) {
   return new Promise(res => {
@@ -390,7 +422,7 @@ async function pollLazada(hubUrl) {
 /* ---------- Shopee (Seller Centre แชท · ร้านที่ล็อกอินอยู่ในเบราว์เซอร์นี้) ---------- */
 const SP_CHAT = 'https://seller.shopee.co.th/new-webchat/conversations';
 const SP_CH = { kengann9: 'shopee-kengann9', keng77: 'shopee-keng77' };   // ชื่อผู้ใช้ร้าน → ช่องทางใน Chat Hub
-async function shopeeTab() { return (await helperTab(u => /^https:\/\/seller\.shopee\.co\.th\/new-webchat/.test(u), SP_CHAT)).tab; }
+async function shopeeTab() { return platTab(u => /^https:\/\/seller\.shopee\.co\.th\/new-webchat/.test(u), SP_CHAT, 'Shopee'); }
 async function pollShopee(hubUrl) {
   const all = (await store.get('spState')) || {};
   const tab = await shopeeTab();
