@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.49
+// @version      3.50
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2663,6 +2663,58 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     let t = 0; new MutationObserver(ms => { if (ms.every(m => quiet(m.target))) return; clearTimeout(t); t = setTimeout(apply, 250); }).observe(document.body, { childList: true, subtree: true, characterData: true });
     document.addEventListener('load', e => { if (e.target && e.target.tagName === 'IMG') { clearTimeout(t); t = setTimeout(apply, 250); } }, true);   // รูปโหลดเสร็จ → ความสูงเปลี่ยน → ย่อหน้าใหม่ (ข้อความท้ายใบไม่ถูกตัด)
     window.addEventListener('beforeprint', () => { busy = false; apply(); });
+    apply();
+  })();
+
+
+  /* ================= 🏷️ ใบจัดสินค้า LnwShop: บาร์โค้ด OID เฉพาะออเดอร์หน้าร้าน (เว็บ LnwShop) =================
+   * ออเดอร์ Shopee/Lazada มีบาร์โค้ดเลขพัสดุอยู่แล้ว → ไม่ใส่ (กันยิงซ้ำ/สับสน)
+   * ออเดอร์ที่สั่งผ่านเว็บร้าน LnwShop → ใส่ Code 128 ของเลข OID มุมขวาบนของหน้าแรกของออเดอร์ ให้ Packing Cam ยิงได้
+   * อ่านอย่างเดียว: ใช้ข้อมูลออเดอร์ที่ฝังอยู่ในหน้าพิมพ์ ไม่แก้ข้อมูลใน LnwShop */
+  (async function lnwOidBarcode() {
+    if (location.hostname !== 'a.lnwstore.com' || !/\/print\/preview\//.test(location.pathname)) return;
+    const PAT = ['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213','221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212','223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323','131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123','113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113','312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214','112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142','121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341','131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232','2331112'];
+    const svg = text => {
+      const s = String(text), codes = [105]; let i = 0;
+      for (; i + 1 < s.length; i += 2) codes.push(Number(s.substr(i, 2)));
+      if (i < s.length) { codes.push(100); codes.push(s.charCodeAt(i) - 32); }
+      let sum = codes[0]; for (let k = 1; k < codes.length; k++) sum += codes[k] * k;
+      codes.push(sum % 103); codes.push(106);
+      let x = 10, bars = '';
+      codes.forEach(c => { const p = PAT[c]; for (let k = 0; k < p.length; k++) { const w = +p[k]; if (k % 2 === 0) bars += '<rect x="' + x + '" y="0" width="' + w + '" height="50"/>'; x += w; } });
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (x + 10) + ' 50" preserveAspectRatio="none" shape-rendering="crispEdges" style="display:block;width:' + Math.min(48, Math.max(30, (x + 10) * 0.33)).toFixed(1) + 'mm;height:11mm;background:#fff">' + bars + '</svg>';
+    };
+    let orders = null;
+    try { const w = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window; if (Array.isArray(w.orders)) orders = w.orders; } catch (e) {}
+    if (!orders) try {
+      const h = await fetch(location.href, { credentials: 'include' }).then(r => r.text());
+      const i0 = h.indexOf('var orders = ['); if (i0 >= 0) {
+        let i = h.indexOf('[', i0), d = 0, q = '', j = i;
+        for (; j < h.length; j++) { const c = h[j]; if (q) { if (c === '\\') j++; else if (c === q) q = ''; continue; } if (c === '"' || c === "'") q = c; else if (c === '[' || c === '{') d++; else if (c === ']' || c === '}') { d--; if (!d) break; } }
+        orders = JSON.parse(h.slice(i, j + 1));
+      }
+    } catch (e) { console.warn('[Packing Cam OID] อ่านข้อมูลออเดอร์ไม่ได้', e); }
+    if (!orders) return;
+    const MARKET = /shopee|lazada|tiktok|line ?shopping|nocnoc/i, web = {};
+    orders.forEach(o => { const ch = String(o.channel || '') + ' ' + String((o.channel_data && o.channel_data.name) || ''); if (!MARKET.test(ch)) web[String(o.id)] = 1; });
+    if (!Object.keys(web).length) return;
+    const css = document.head.appendChild(document.createElement('style'));
+    css.textContent = '.pc-oidbc{position:absolute;right:0;top:0;z-index:3;background:#fff;text-align:center;padding:1mm}.pc-oidbc div{font:700 12px monospace;letter-spacing:2px;margin-top:1px}';
+    const apply = () => {
+      let cur = '';
+      document.querySelectorAll('.page').forEach(pg => {
+        const pc = pg.querySelector('.pagecount'), di = pg.querySelector('.inforow.docid .info');
+        const m = /#\s*(\d+)/.exec((pc && pc.textContent) || (di && di.textContent) || ''); if (m) cur = m[1];
+        if (!cur || !web[cur] || pg.querySelector('.pc-oidbc')) return;
+        if (pc && /หน้า\s*([2-9]|\d{2,})\s*\//.test(pc.textContent)) return;   // หน้าแรกของออเดอร์เท่านั้น
+        const host = pg.querySelector('.first-zone') || pg.querySelector('.header') || pg;
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        const b = document.createElement('div'); b.className = 'pc-oidbc'; b.innerHTML = svg(cur) + '<div>' + cur + '</div>';
+        host.appendChild(b);
+      });
+    };
+    let t = 0; new MutationObserver(() => { clearTimeout(t); t = setTimeout(apply, 300); }).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('beforeprint', apply);
     apply();
   })();
 

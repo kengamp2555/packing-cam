@@ -1068,8 +1068,8 @@ async function initDetector() {
  * เลขพัสดุ/เลขออเดอร์จริงยาว 8 ตัวขึ้นไป → สั้นกว่านั้นไม่รับ · แบบที่อ่านพลาดง่าย (codabar/itf/upc/ean8) ต้องยาว 10 ตัวขึ้นไป */
 function codeOk(v, fmt) {
   const c = String(v || '').trim();
-  // เลขบิล POS (ใบจัดเตรียมสินค้า) เป็นตัวเลข 6–7 หลัก Code 128 → รับเฉพาะแบบนี้ (แบบอื่นยังต้อง 8 ตัวขึ้นไป)
-  if (/^\d{6,7}$/.test(c)) return /code.?128/i.test(fmt || '');
+  // เลขบิล POS (6–7 หลัก) / OID หน้าร้าน LnwShop (5 หลัก) เป็น Code 128 ตัวเลขล้วน → รับเฉพาะแบบนี้ (แบบอื่นยังต้อง 8 ตัวขึ้นไป)
+  if (/^\d{5,7}$/.test(c)) return /code.?128/i.test(fmt || '');
   if (!/^[A-Za-z0-9\-_]{8,40}$/.test(c)) return false;
   if (/codabar|itf|upc|ean_8/i.test(fmt || '') && c.length < 10) return false;
   return /\d/.test(c);   // ต้องมีตัวเลขอย่างน้อย 1 ตัว
