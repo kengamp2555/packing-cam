@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shopee → Packing Cam: ส่งออกคืนสินค้า + รายรับอัตโนมัติ (+ LnwShop)
 // @namespace    packing-cam
-// @version      3.51
+// @version      3.52
 // @description  คืนสินค้า: รับคำขอจากแอป → Export 30 วัน → ส่งเข้า Drive · รายรับ: เปิดหน้า 'รายรับของฉัน' → ดึงไฟล์โอนแล้ว → นำเข้า FIN_ เอง
 // @match        https://seller.shopee.co.th/*
 // @match        https://a.lnwstore.com/*
@@ -2666,6 +2666,33 @@ var QRCode=R("index"),EC=R("QRErrorCorrectLevel");(typeof window!=="undefined"?w
     apply();
   })();
 
+
+  /* ================= 🏪 LnwShop "รอจัดส่ง" (ออเดอร์หน้าร้าน/LINE ไม่ใช่ Shopee/Lazada/TikTok) → Packing Cam (การ์ด LnwShop หน้าร้าน) =================
+   * ทำงานเมื่อเปิดหลังร้าน LnwShop (แท็บไหนก็ได้) · ทุก 10 นาที อ่านหน้า "การแพ็ค | จัดส่ง → รอจัดส่ง" (GET อ่านอย่างเดียว ไม่แก้อะไรใน LnwShop)
+   * นับเฉพาะออเดอร์ที่ชำระเงินภายใน 21 วัน (ออเดอร์เก่าค้างในระบบหลายปีไม่นับ) */
+  (function lnwWaitSync() {
+    if (location.hostname !== 'a.lnwstore.com') return;
+    const slug = location.pathname.split('/')[1]; if (!slug || /^(pure|static|assets|system|external)$/.test(slug) || /print/.test(location.pathname)) return;
+    const KEY = 'pcLnwWaitAt';
+    const run = async () => {
+      try {
+        let last = 0; try { last = +localStorage.getItem(KEY) || 0; } catch (e) { }
+        if (Date.now() - last < 9 * 60000) return;
+        try { localStorage.setItem(KEY, String(Date.now())); } catch (e) { }
+        const h = await fetch('/' + slug + '/shipping?sheet=all&state=wait_send', { credentials: 'include' }).then(r => r.text());
+        const i0 = h.indexOf('var orders = ['); if (i0 < 0) return;
+        let i = h.indexOf('[', i0), d = 0, q = '', j = i;
+        for (; j < h.length; j++) { const c = h[j]; if (q) { if (c === '\\') j++; else if (c === q) q = ''; continue; } if (c === '"' || c === "'") q = c; else if (c === '[' || c === '{') d++; else if (c === ']' || c === '}') { d--; if (!d) break; } }
+        const orders = JSON.parse(h.slice(i, j + 1)), since = new Date(Date.now() - 21 * 86400000).toISOString().slice(0, 10);
+        const list = orders.filter(o => o && o.id && o.stage === 'wait_send' && !o.is_channel_shopee && !o.is_channel_lazada && !o.is_channel_tiktok_shop && !o.is_channel_line_shopping &&
+          String(o.acceptpayment_time || o.order_time || '').slice(0, 10) >= since)
+          .map(o => ({ oid: String(o.id), ch: (o.channel_data && o.channel_data.name) || o.channel || '', name: o.receiver_name || '', paid: o.acceptpayment_time || o.order_time || '', ship: o.shipping_type_text || '' }));
+        await api('lnwWait', { list }, true);
+        console.log('[Packing Cam] LnwShop รอจัดส่ง', list.length);
+      } catch (e) { console.warn('[Packing Cam] LnwShop รอจัดส่ง', e); }
+    };
+    setTimeout(run, 4000); setInterval(run, 10 * 60000);
+  })();
 
   /* ================= 🖨️ หน้าจัดส่งของ LnwShop: ปุ่ม "พิมพ์เรียงร้าน/ขนส่ง" =================
    * ใช้ออเดอร์ที่แสดงอยู่ในหน้า (ตามตัวกรองที่เลือกไว้ เช่น ยังไม่เคยพิมพ์ + รอจัดส่ง) เรียงตาม ร้าน → ขนส่ง → เลขออเดอร์
