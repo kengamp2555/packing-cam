@@ -227,7 +227,7 @@
     <button id="bellBtn" title="แจ้งเตือนวันนี้">🔔<span id="bellN" hidden></span></button>
     <button id="cfg">⚙️</button>
   </div>
-  <div id="pfBar" hidden title="แตะเพื่อสลับ บาท / %"></div>
+  <div id="pfBar" hidden></div>
   <div id="holdBox" hidden></div>
   <div id="todayPanel" hidden><div class="sheet" id="todaySheet"></div></div>
   <div id="holdAlert" hidden></div>
@@ -538,16 +538,16 @@ function saveAuto() {
 /* ===== 💰 กำไรสด: ยิงกล่องไหน บวกกำไรของออเดอร์นั้นเข้ายอดวันนี้ · แตะ = สลับ บาท / % ===== */
 var pfData = null, pfTimer = 0, pfSoon = 0, pfPrev = null;
 const pfB = n => '฿' + Math.round(n).toLocaleString('th-TH');
-function pfFmt(o) {
+// แสดงแบบเดียวกันทุกเครื่อง: ฿บาท (เปอร์เซ็นต์) · ไม่มีปุ่มสลับแล้ว (เดิมแต่ละเครื่องจำค่าที่แตะไว้ไม่เหมือนกัน)
+function pfFmt(o, sign) {
   const pct = o.rev ? o.profit / o.rev * 100 : 0, cls = o.profit < 0 ? 'neg' : 'pos';
-  return S.pfUnit === 'pct' ? '<b class="' + cls + '">' + pct.toFixed(1) + '%</b> <span style="color:var(--mut)">' + pfB(o.profit) + '</span>'
-    : '<b class="' + cls + '">' + pfB(o.profit) + '</b> <span style="color:var(--mut)">' + pct.toFixed(1) + '%</span>';
+  return '<b class="' + cls + '">' + (sign && o.profit >= 0 ? '+' : '') + pfB(o.profit) + '</b> <span class="' + cls + '" style="opacity:.85">(' + pct.toFixed(1) + '%)</span>';
 }
 function renderProfit() {
   const el = $('pfBar'); if (!el) return;
   if (!S.profit || !pfData) { el.hidden = true; return; }
   const d = pfData, T = d.total, L = d.last;
-  const lastTxt = L ? (L.ok ? 'กล่องล่าสุด <b class="' + (L.profit < 0 ? 'neg' : 'pos') + '">' + (L.profit >= 0 ? '+' : '') + (S.pfUnit === 'pct' ? (L.rev ? (L.profit / L.rev * 100).toFixed(0) + '%' : '-') : pfB(L.profit)) + '</b> <span style="color:var(--mut)">' + (L.ch || '') + ' ขาย ' + pfB(L.rev) + '</span>'
+  const lastTxt = L ? (L.ok ? 'กล่องล่าสุด กำไร ' + pfFmt(L, true) + ' <span style="color:var(--mut)">· ' + (L.ch || '') + ' ขาย ' + pfB(L.rev) + '</span>'
     : 'กล่องล่าสุด <span style="color:#fbbf24">' + (d.pending ? 'กำลังคิด…' : 'ยังหาออเดอร์ไม่เจอ') + '</span>') : '';
   el.innerHTML = '<div class="top"><span>💰 กำไรวันนี้ ' + pfFmt(T) + '</span><span>📦 ' + d.counted + '/' + d.boxes + ' กล่อง</span></div>' +
     '<div class="sub">' + lastTxt + ' · ขายรวม ' + pfB(T.rev) + (T.noCost > 0 ? ' · <span style="color:#fbbf24">ไม่มีต้นทุน ' + pfB(T.noCost) + '</span>' : '') +
@@ -564,7 +564,7 @@ function loadProfit() {
 }
 function profitSoon(ms) { if (!S.profit) return; clearTimeout(pfSoon); pfSoon = setTimeout(loadProfit, ms || 2500); }   // หลังรูปกล่องอัปโหลดเสร็จ → อัปเดตกำไร
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.profit) loadProfit(); });
-setTimeout(() => { const b = $('pfBar'); if (b) b.onclick = () => { S.pfUnit = S.pfUnit === 'pct' ? 'baht' : 'pct'; saveS(); renderProfit(); }; loadProfit(); }, 800);
+setTimeout(() => { const b = $('pfBar'); if (b) { b.onclick = () => loadProfit(); b.title = 'แตะเพื่ออัปเดตตอนนี้'; } loadProfit(); }, 800);
 
 function loadHold(fresh) {
   if (!IN_GAS && !API_URL) return Promise.resolve();
