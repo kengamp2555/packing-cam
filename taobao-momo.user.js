@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      2.9
+// @version      3.0
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -131,8 +131,59 @@
     const SVC = /^(www|s|buyertrade|trade|cart|buy|login|i|h5|m|market|favorite|item|detail|pages|list|world|rate|refund\d*|consumeprod|ai|guang|huodong|pub|wuliu|myseller|seller|fuwu|ishop|uland|tb|g|gw|img|gtms\d*|o|tbc|qn|sell|scm)\./;
     const isShop = /^shop\d+\.taobao\.com$/.test(HOST) || /\.world\.taobao\.com$/.test(HOST) || (/\.tmall\.com$/.test(HOST) && !/^(detail|buy|cart|www|login|pages|list|s)\./.test(HOST))
       || (/^[a-z0-9-]+\.taobao\.com$/.test(HOST) && !SVC.test(HOST));
+    if (HOST === 'cart.taobao.com' || isItem) dupGuard(isItem);
     if (isItem || isShop) shopCapture(isItem);
     return;
+  }
+  /* 🛒 กันสั่งซ้ำ: หน้าตะกร้า + หน้าสินค้า → เทียบรุ่นสินค้า (เช่น L7812CV, IRFP150N) กับที่สั่งไปแล้วใน 60 วัน (Import Tracker) → ป้ายเตือนสีแดง
+   * อ่านอย่างเดียว ไม่แตะตะกร้า/คำสั่งซื้อ */
+  function dupGuard(isItem) {
+    const esc2 = t => String(t || '').replace(/[<&"]/g, c => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' }[c]));
+    const NOISE = /^(TO\d+[A-Z]?|DIP\d+|SOP\d+|SOT\d+|SMD\d*|QFN\d+|88VIP|TH\d*|\d+(\.\d+)?(V|A|MA|W|KW|K|R|UF|NF|PF|MM|CM|M|MAH|HZ|KHZ|MHZ|PCS|PIN|P|G|KG|C|DB|CH|X|AWG|OHM)|\d+X\d+.*|20\d\d|\d+)$/;
+    const toks = t => {
+      const out = new Set();
+      String(t || '').toUpperCase().replace(/[（(【\[\]）)】,，、\/|+]/g, ' ').split(/\s+/).forEach(w => {
+        (w.match(/[A-Z0-9][A-Z0-9.\-_]{2,}/g) || []).forEach(x => {
+          [x].concat(/-/.test(x) ? [x.split('-')[0]] : []).forEach(y => {   // L7808CV-DG → L7808CVDG + L7808CV
+            const k = y.replace(/[.\-_]/g, ''); if (k.length < 5 || !/[A-Z]/.test(k) || !/\d/.test(k) || NOISE.test(k)) return; out.add(k);
+          });
+        });
+      });
+      return out;
+    };
+    let idx = null;
+    const load = async () => {
+      const key = 'itBought', c = (() => { try { return JSON.parse(GM_getValue(key, '') || 'null'); } catch (e) { return null; } })();
+      if (c && Date.now() - c.at < 15 * 60000) return c.items;
+      try { const r = await post({ action: 'bought' }); GM_setValue(key, JSON.stringify({ at: Date.now(), items: r.items || [] })); return r.items || []; }
+      catch (e) { return c ? c.items : []; }
+    };
+    const build = items => { const m = {}; items.forEach(it => toks(it.t + ' ' + it.s).forEach(k => (m[k] = m[k] || []).push(it))); return m; };
+    const css = 'display:block;margin:4px 0;padding:4px 8px;border-radius:6px;background:#fff1f0;border:1px solid #f5222d;color:#a8071a;font:600 12px/1.45 system-ui,sans-serif;white-space:normal';
+    const badge = hits => {
+      const seen = {}, rows = hits.filter(h => { const k = h.o + h.t; if (seen[k]) return false; seen[k] = 1; return true; }).slice(0, 4);
+      const d = document.createElement('div'); d.className = 'it-dup'; d.style.cssText = css;
+      d.innerHTML = '⚠️ สั่งแล้ว (กันสั่งซ้ำ): ' + rows.map(h => '<div style="font-weight:500;color:#5c0011">• ' + esc2(h.d.slice(5)) + ' · ' + esc2(h.shop) + ' · ×' + h.q + ' · ¥' + h.p + ' · ' + esc2(h.st) +
+        '<br><span style="color:#888">' + esc2(h.t.slice(0, 60)) + (h.s ? ' 【' + esc2(h.s.slice(0, 30)) + '】' : '') + '</span></div>').join('');
+      return d;
+    };
+    const match = title => { const hits = []; toks(title).forEach(k => (idx[k] || []).forEach(h => hits.push(h))); return hits; };
+    const scan = () => {
+      if (!idx) return;
+      if (isItem) {
+        if (document.querySelector('.it-dup')) return;
+        const h1 = document.querySelector('h1') || document.querySelector('[class*="mainTitle"]'), title = (h1 && h1.textContent) || document.title;
+        const hits = match(title); if (!hits.length) return;
+        const b = badge(hits); b.style.cssText += ';position:fixed;left:12px;bottom:12px;z-index:2147483646;max-width:420px;box-shadow:0 4px 14px rgba(0,0,0,.2)';
+        document.body.appendChild(b); return;
+      }
+      document.querySelectorAll('a[href*="item.htm"], a[href*="detail.tmall"]').forEach(a => {
+        if (a.dataset.itDup) return; const t = (a.textContent || '').trim(); if (t.length < 8) return;
+        a.dataset.itDup = '1'; const hits = match(t); if (!hits.length) return;
+        a.insertAdjacentElement('afterend', badge(hits));
+      });
+    };
+    load().then(items => { idx = build(items); scan(); let tm = 0; new MutationObserver(() => { clearTimeout(tm); tm = setTimeout(scan, 600); }).observe(document.documentElement, { childList: true, subtree: true }); });
   }
   function shopCapture(isItem) {
     const uni = s => { try { return JSON.parse('"' + String(s).replace(/"/g, '\\"') + '"'); } catch (e) { return String(s); } };
