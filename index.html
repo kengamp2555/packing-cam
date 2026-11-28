@@ -1685,7 +1685,7 @@ function openViewer(it) {
   $('vImg').removeAttribute('src');
   $('vImg').style.display = 'none';
   $('vDel').style.display = it.status ? 'none' : '';
-  $('vRe').style.display = it.fromToday && !it.status ? '' : 'none';
+  $('vRe').style.display = !it.status && (it.fromToday || /^NO-?BARCODE/i.test(String(it.barcode || ''))) ? '' : 'none';   // รูปที่อ่านบาร์โค้ดไม่ได้ (NO-BARCODE) จับคู่เลขพัสดุเองได้
   $('viewer').classList.toggle('top', !!it.fromToday);   // เปิดจากหน้า 🔔 → ต้องอยู่เหนือแผงสรุป
   $('vPick').hidden = true;
   $('vImg').onclick = null;
@@ -1726,6 +1726,7 @@ $('vRe').onclick = () => {
     callApi('rebarcode', { row: it.row, old: it.barcode, barcode: nb, by: S.staff || '' }).then(res => {
       todayData = res; holdItems = res.hold || []; renderHold();
       closeViewer(); renderToday('✅ จับคู่ใหม่แล้ว: ' + it.barcode + ' → ' + nb);
+      if (mode === 'find' && /^NO-?BARCODE/i.test(String(it.barcode || ''))) { try { doSearch('NO-BARCODE'); } catch (e) { } }   // รายการ NO-BARCODE ที่เปิดอยู่ → โหลดใหม่ (รูปที่จับคู่แล้วหายไป)
     }).catch(e => { P.querySelectorAll('button').forEach(b => b.disabled = false); alert('❌ จับคู่ไม่สำเร็จ: ' + (e.message || e)); });
   };
   P.querySelectorAll('button[data-k]').forEach(b => b.onclick = () => go(cand[+b.dataset.k].track));
