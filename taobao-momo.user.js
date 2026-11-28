@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      3.3
+// @version      3.4
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -249,7 +249,11 @@
           '<div id="itS_pmsg" style="margin-top:4px;min-height:16px"></div><div style="text-align:right">' + bigBtn('itS_pgo', '💲 อัปเดตราคา + ลิงก์', '#2563eb') + '</div></div>' +
           '<div id="itS_newBox" style="' + box('#f3fbf5', '#137333') + '"><b style="color:#137333">③ เพิ่มเป็นสินค้าใหม่ในชีต Product</b> <span style="color:#667;font-size:12px">แถวว่างถัดไป · ยังไม่มีรหัส (ออกรหัสที่แผนรหัส)</span>' +
           '<div style="font-size:12px;color:#667;margin:3px 0">ตัวเลือกที่เลือกอยู่: <b id="itS_var" style="color:#111">–</b></div>' +
-          'ชื่อเต็มสินค้า (J) <span style="color:#667;font-size:12px">แก้ได้ · ราคา ¥ ใช้ช่องในกล่อง ②</span><textarea id="itS_nname" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;margin:3px 0;border:1px solid #ccc;border-radius:6px;font:13px sans-serif"></textarea>' +
+          '<div style="display:flex;gap:6px;align-items:center;margin:2px 0">ราคา ¥ <input id="itS_ncny" type="number" min="0" step="any" style="width:90px;padding:6px;border:1px solid #ccc;border-radius:6px">' +
+          '<button id="itS_nreset" title="ใช้ราคาตามตัวเลือกบนหน้าเว็บ" style="padding:5px 8px;border:1px solid #137333;background:#fff;color:#137333;border-radius:6px;cursor:pointer">↺ ราคาหน้าเว็บ</button>' +
+          '<span id="itS_nhint" style="color:#667;font-size:12px">ขายเป็นแพค → แก้ราคาเองได้</span></div>' +
+          '<div style="font-size:12px;color:#667;word-break:break-all">ลิงก์: <span id="itS_nlink">–</span></div>' +
+          'ชื่อเต็มสินค้า (J) <span style="color:#667;font-size:12px">แก้ได้</span><textarea id="itS_nname" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;margin:3px 0;border:1px solid #ccc;border-radius:6px;font:13px sans-serif"></textarea>' +
           'ชื่อย่อ (X)' + inp('itS_nshort', '', 'เช่น LM293P TI') +
           'หมวดหมู่ (R / S / T) <span id="itS_cmsg" style="color:#667;font-size:12px">กำลังโหลดหมวด…</span><div style="display:flex;gap:4px">' +
             ['itS_c1', 'itS_c2', 'itS_c3'].map(id => '<select id="' + id + '" style="flex:1;min-width:0;padding:6px 4px;border:1px solid #ccc;border-radius:6px;background:#fff;font:13px sans-serif"></select>').join('') + '</div>' +
@@ -350,8 +354,24 @@
       };
       if (isItem) {
         let lastVar = null;
-        const syncVar = () => { const v = selVar(); if (v.text === lastVar) return; lastVar = v.text; $('itS_var').textContent = v.text || '(ยังไม่ได้เลือกตัวเลือก)';
-          if (!$('itS_nname').dataset.edited) $('itS_nname').value = (v.text ? v.text + '\n' : '') + (x.title || ''); };
+        // ราคาที่หน้าเว็บแสดงตามตัวเลือกที่เลือกอยู่ (ราคาหลักข้างชื่อสินค้า)
+        const pagePrice = () => {
+          for (const sel of ['[class*="highlightPrice"] [class*="text"]', '[class*="priceText"]', '[class*="Price--priceText"]', '[class*="price--"] [class*="text"]', '.tb-rmb-num', '#J_StrPrice .tb-rmb-num']) {
+            const el = document.querySelector(sel); if (!el || el.closest('#itShopPanel')) continue;
+            const m = /(\d+(?:\.\d+)?)/.exec(el.textContent || ''); if (m && +m[1] > 0) return +m[1];
+          }
+          const m = /[¥￥]\s*(\d+(?:\.\d+)?)/.exec((document.querySelector('main') || document.body).innerText.slice(0, 8000)); return m ? +m[1] : 0;
+        };
+        const syncPrice = force => { if (!force && $('itS_ncny').dataset.edited) return; const p = pagePrice(); if (p > 0) { $('itS_ncny').value = p; delete $('itS_ncny').dataset.edited; $('itS_nhint').textContent = 'ตามหน้าเว็บ · ขายเป็นแพค → แก้เองได้'; } };
+        $('itS_ncny').oninput = () => { $('itS_ncny').dataset.edited = '1'; $('itS_nhint').textContent = '✏️ แก้เอง (ไม่เปลี่ยนตามตัวเลือก)'; };
+        $('itS_nreset').onclick = () => syncPrice(true);
+        let lastLink = '';
+        const syncVar = () => {
+          const lk = $('itS_link').value || curLink(); if (lk !== lastLink) { lastLink = lk; $('itS_nlink').textContent = lk; }
+          const v = selVar(); if (v.text === lastVar) return; lastVar = v.text; $('itS_var').textContent = v.text || '(ยังไม่ได้เลือกตัวเลือก)';
+          if (!$('itS_nname').dataset.edited) $('itS_nname').value = (v.text ? v.text + '\n' : '') + (x.title || '');
+          setTimeout(() => syncPrice(false), 400);   // ราคาบนหน้าเว็บเปลี่ยนหลังกดตัวเลือกเล็กน้อย
+        };
         $('itS_nname').oninput = () => { $('itS_nname').dataset.edited = '1'; };
         // หมวดจากชีต Product (จำในเครื่อง 1 ชม.) · dropdown 3 ชั้น กรองตามชั้นก่อนหน้า · "+ หมวดใหม่…" = พิมพ์เอง
         let CATS = []; const extra = { itS_c1: [], itS_c2: [], itS_c3: [] }, NEW = '\u0001new';
@@ -376,12 +396,12 @@
           catch (e) { $('itS_cmsg').textContent = '⚠️ โหลดหมวดไม่ได้: ' + e.message; }
         })();
         $('itS_ngo').onclick = async () => {
-          const v = selVar(), name = $('itS_nname').value.trim(), cny = +$('itS_cny').value || 0, nmsg = (t, bad) => say2('itS_nmsg', t, bad);
+          const v = selVar(), name = $('itS_nname').value.trim(), cny = +$('itS_ncny').value || 0, nmsg = (t, bad) => say2('itS_nmsg', t, bad);
           if (!name) return nmsg('ใส่ชื่อสินค้าก่อน', true);
           if (!confirm('เพิ่มสินค้าใหม่ลงชีต Product?\n\n' + name.slice(0, 120) + (cny ? '\nราคา ¥' + cny : '') + (x.cn ? '\nร้าน ' + x.cn : ''))) return;
           $('itS_ngo').disabled = true; nmsg('กำลังเพิ่ม… (~10–20 วิ รวมใส่รูป)');
           try {
-            const r = await post({ action: 'newProduct', itemId: x.itemId, variant: v.text, title: x.title, name, pic: v.pic, cny, shop: x.cn || '', link: $('itS_link').value.trim(),
+            const r = await post({ action: 'newProduct', itemId: x.itemId, variant: v.text, title: x.title, name, pic: v.pic, cny, shop: x.cn || '', link: $('itS_link').value.trim() || curLink(),
               short: $('itS_nshort').value.trim(), cat: ['itS_c1', 'itS_c2', 'itS_c3'].map(id => $(id).value === NEW ? '' : $(id).value),
               weight: +$('itS_nw').value || 0, dims: [+$('itS_nd1').value || 0, +$('itS_nd2').value || 0, +$('itS_nd3').value || 0] });
             if (r.dup) nmsg('⚠️ มีสินค้านี้ในชีตแล้ว แถว ' + r.dup + ' (ไม่ได้เพิ่มซ้ำ)', true);
