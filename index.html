@@ -625,7 +625,7 @@ function renderToday(msg) {
   h += '<h3>' + (r.hold.length ? '<span class="bad">⛔ ลูกค้ายกเลิก – อย่าจัดส่ง ' + r.hold.length + ' กล่อง</span>' : '<span class="ok">✅ ไม่มีกล่องที่ถูกยกเลิก</span>') + '</h3>';
   r.hold.forEach((x, i) => {
     h += '<div style="background:#3a1114;border:1px solid #e5484d;border-radius:12px;padding:10px;margin:6px 0">' +
-      '<b style="font-size:17px">📦 ' + esc(x.track) + '</b>' + (x.packedToday ? ' <span class="bad">• แพคไปแล้ววันนี้ – เอาออกจากกองส่ง</span>' : '') +
+      '<b style="font-size:17px">📦 ' + esc(x.track) + '</b>' + (x.packedToday ? ' <span class="bad">• แพคไปแล้ววันนี้ – เอาออกจากกองส่ง</span>' : x.packedBefore ? ' <span class="bad">• แพคแล้วเมื่อ ' + esc(String(x.packedAt).slice(8, 10) + '/' + String(x.packedAt).slice(5, 7)) + ' – ถ้ายังอยู่ในกองส่ง ให้เอาออก</span>' : '') +
       '<br>' + esc(x.src + ' ' + x.order) + (x.items ? '<br>' + esc(x.items) : '') + (x.reason ? '<br><span class="mut">เหตุผล: ' + esc(x.reason) + '</span>' : '') +
       '<br><button data-h="' + i + '" style="margin-top:6px;background:#e5484d">✓ เอาออกแล้ว</button></div>';
   });
