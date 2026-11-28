@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Taobao + Momo Cargo → Import Tracker
 // @namespace    import-tracker
-// @version      3.1
+// @version      3.2
 // @description  ดึงออเดอร์ Taobao (เลขพัสดุจีน + สินค้า) และสถานะ Momo Cargo ส่งเข้า Import Tracker อัตโนมัติ · อ่านอย่างเดียว ไม่กดยืนยัน/ซื้อ/จ่าย
 // @match        https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm*
 // @match        https://market.m.taobao.com/app/dinamic/pc-trade-logistics/*
@@ -250,6 +250,10 @@
           '<div id="itS_newBox" style="' + box('#f3fbf5', '#137333') + '"><b style="color:#137333">③ เพิ่มเป็นสินค้าใหม่ในชีต Product</b> <span style="color:#667;font-size:12px">แถวว่างถัดไป · ยังไม่มีรหัส (ออกรหัสที่แผนรหัส)</span>' +
           '<div style="font-size:12px;color:#667;margin:3px 0">ตัวเลือกที่เลือกอยู่: <b id="itS_var" style="color:#111">–</b></div>' +
           'ชื่อเต็มสินค้า (J) <span style="color:#667;font-size:12px">แก้ได้ · ราคา ¥ ใช้ช่องในกล่อง ②</span><textarea id="itS_nname" rows="3" style="width:100%;box-sizing:border-box;padding:6px 8px;margin:3px 0;border:1px solid #ccc;border-radius:6px;font:13px sans-serif"></textarea>' +
+          'ชื่อย่อ (X)' + inp('itS_nshort', '', 'เช่น LM293P TI') +
+          'หมวดหมู่ (R / S / T) <span style="color:#667;font-size:12px">พิมพ์หรือเลือกจากรายการ</span><div style="display:flex;gap:4px">' +
+            ['itS_c1', 'itS_c2', 'itS_c3'].map((id, k) => '<input id="' + id + '" list="' + id + '_l" placeholder="' + ['หมวดหลัก', 'หมวดย่อย 1', 'หมวดย่อย 2'][k] + '" style="flex:1;min-width:0;padding:6px;border:1px solid #ccc;border-radius:6px"><datalist id="' + id + '_l"></datalist>').join('') + '</div>' +
+          '<div style="display:flex;gap:4px;margin-top:4px;align-items:center;font-size:12px">' + [['itS_nw', 'น้ำหนัก ก.'], ['itS_nd1', 'กว้าง ซม.'], ['itS_nd2', 'ยาว ซม.'], ['itS_nd3', 'สูง ซม.']].map(a => '<input id="' + a[0] + '" type="number" min="0" step="any" placeholder="' + a[1] + '" style="flex:1;min-width:0;padding:6px;border:1px solid #ccc;border-radius:6px">').join('') + '</div>' +
           '<div id="itS_nmsg" style="margin-top:4px;min-height:16px"></div><div style="text-align:right">' + bigBtn('itS_ngo', '➕ เพิ่มสินค้าใหม่', '#137333') + '</div></div>' : '');
       document.body.appendChild(d);
       const $ = id => document.getElementById(id);
@@ -349,6 +353,15 @@
         const syncVar = () => { const v = selVar(); if (v.text === lastVar) return; lastVar = v.text; $('itS_var').textContent = v.text || '(ยังไม่ได้เลือกตัวเลือก)';
           if (!$('itS_nname').dataset.edited) $('itS_nname').value = (v.text ? v.text + '\n' : '') + (x.title || ''); };
         $('itS_nname').oninput = () => { $('itS_nname').dataset.edited = '1'; };
+        // หมวดจากชีต Product (จำในเครื่อง 1 ชม.) · เลือกหมวดหลักแล้วรายการหมวดย่อยกรองตาม
+        let CATS = []; const fillCats = () => {
+          const a = $('itS_c1').value.trim(), b = $('itS_c2').value.trim(), uniq = arr => [...new Set(arr.filter(Boolean))].sort();
+          const opt = (id, list) => { $(id + '_l').innerHTML = list.map(v => '<option value="' + esc2(v) + '">').join(''); };
+          opt('itS_c1', uniq(CATS.map(c => c[0]))); opt('itS_c2', uniq(CATS.filter(c => !a || c[0] === a).map(c => c[1]))); opt('itS_c3', uniq(CATS.filter(c => (!a || c[0] === a) && (!b || c[1] === b)).map(c => c[2])));
+        };
+        ['itS_c1', 'itS_c2'].forEach(id => { $(id).oninput = fillCats; });
+        (async () => { try { const c = JSON.parse(GM_getValue('itCats', 'null') || 'null'); if (c && Date.now() - c.at < 3600e3) { CATS = c.cats; return fillCats(); }
+          const r = await post({ action: 'cats' }); CATS = r.cats || []; GM_setValue('itCats', JSON.stringify({ at: Date.now(), cats: CATS })); fillCats(); } catch (e) { } })();
         syncVar(); const vt = setInterval(() => { if (!document.body.contains(d)) return clearInterval(vt); syncVar(); }, 800);
         $('itS_ngo').onclick = async () => {
           const v = selVar(), name = $('itS_nname').value.trim(), cny = +$('itS_cny').value || 0, nmsg = (t, bad) => say2('itS_nmsg', t, bad);
@@ -356,7 +369,9 @@
           if (!confirm('เพิ่มสินค้าใหม่ลงชีต Product?\n\n' + name.slice(0, 120) + (cny ? '\nราคา ¥' + cny : '') + (x.cn ? '\nร้าน ' + x.cn : ''))) return;
           $('itS_ngo').disabled = true; nmsg('กำลังเพิ่ม… (~10–20 วิ รวมใส่รูป)');
           try {
-            const r = await post({ action: 'newProduct', itemId: x.itemId, variant: v.text, title: x.title, name, pic: v.pic, cny, shop: x.cn || '', link: $('itS_link').value.trim() });
+            const r = await post({ action: 'newProduct', itemId: x.itemId, variant: v.text, title: x.title, name, pic: v.pic, cny, shop: x.cn || '', link: $('itS_link').value.trim(),
+              short: $('itS_nshort').value.trim(), cat: [$('itS_c1').value.trim(), $('itS_c2').value.trim(), $('itS_c3').value.trim()],
+              weight: +$('itS_nw').value || 0, dims: [+$('itS_nd1').value || 0, +$('itS_nd2').value || 0, +$('itS_nd3').value || 0] });
             if (r.dup) nmsg('⚠️ มีสินค้านี้ในชีตแล้ว แถว ' + r.dup + ' (ไม่ได้เพิ่มซ้ำ)', true);
             else nmsg('✅ เพิ่มแล้ว แถว ' + r.row + (r.dealer ? ' · ร้าน ' + r.dealer : '') + (r.catWhy ? ' · ⚠️ ' + r.catWhy : '') + ' → ไปออกรหัสที่ POS แผนรหัส', !!r.catWhy);
           } catch (e) { nmsg('❌ ' + e.message, true); }
